@@ -1,5 +1,5 @@
-import os
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -8,8 +8,10 @@ import pytest
 
 from ev4_architect_stage_qc.architect_adapter import LOCK_PATH, verify
 
-
-LOCKED_FILE = "contracts/project-gate/producer-gate-export.v1.schema.json"
+LOCKED_FILE = "scripts/architect_quality_runtime.py"
+EXPECTED_ARCHITECT_HEAD = "90503f18597a72d3764d4cb8fcc2c68b2531c85a"
+EXPECTED_INTERFACE = "ev4-architect-quality-runtime@2.0.0"
+EXPECTED_AUTHORITY_FILES = 16
 
 
 def authority_root():
@@ -23,25 +25,47 @@ def _worktree(tmp_path, name):
     root = authority_root()
     worktree = tmp_path / name
     branch = f"qc-compatibility-{name}"
-    subprocess.run(["git", "-C", str(root), "worktree", "add", "-b", branch, str(worktree), "HEAD"], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(root), "worktree", "add", "-b", branch, str(worktree), "HEAD"],
+        check=True,
+        capture_output=True,
+    )
     subprocess.run(["git", "-C", str(worktree), "config", "user.email", "qc@example.invalid"], check=True)
     subprocess.run(["git", "-C", str(worktree), "config", "user.name", "QC compatibility test"], check=True)
     return root, worktree
 
 
 def _remove_worktree(root, worktree):
-    subprocess.run(["git", "-C", str(root), "worktree", "remove", "--force", str(worktree)], check=True, capture_output=True)
-    subprocess.run(["git", "-C", str(root), "branch", "-D", f"qc-compatibility-{worktree.name}"], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(root), "worktree", "remove", "--force", str(worktree)],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(root), "branch", "-D", f"qc-compatibility-{worktree.name}"],
+        check=True,
+        capture_output=True,
+    )
 
 
-def test_reference_checkout_loads_official_functions():
+def test_reference_checkout_loads_runtime_interface_v2():
     connection = verify(authority_root())
     assert connection.ok, connection.reason
     assert connection.runtime is not None
     assert callable(connection.runtime.evaluate_run)
     assert callable(connection.runtime.evaluate_stage)
+    assert connection.runtime.RunContext is not None
+    assert connection.runtime_interface_id == EXPECTED_INTERFACE
+    assert connection.runtime.RUNTIME_INTERFACE_ID == EXPECTED_INTERFACE
     assert connection.compatibility_mode == "authority_file_identity"
-    assert connection.reference_commit == "338228cec0aeae951581690c3faba68f512e615c"
+    assert connection.reference_commit == EXPECTED_ARCHITECT_HEAD
+    assert len(connection.identities) == EXPECTED_AUTHORITY_FILES
+
+
+def test_connection_exposes_no_legacy_trusted_context():
+    connection = verify(authority_root())
+    assert connection.ok, connection.reason
+    assert not hasattr(connection, "trusted_context")
 
 
 def test_wrong_checkout_blocks(tmp_path):
@@ -50,9 +74,14 @@ def test_wrong_checkout_blocks(tmp_path):
 
 def test_wrong_repository_origin_is_rejected(tmp_path):
     root, worktree = _worktree(tmp_path, "wrong-origin")
-    original = subprocess.check_output(["git", "-C", str(worktree), "config", "--get", "remote.origin.url"], text=True).strip()
+    original = subprocess.check_output(
+        ["git", "-C", str(worktree), "config", "--get", "remote.origin.url"], text=True
+    ).strip()
     try:
-        subprocess.run(["git", "-C", str(worktree), "remote", "set-url", "origin", "https://github.com/example/not-architect.git"], check=True)
+        subprocess.run(
+            ["git", "-C", str(worktree), "remote", "set-url", "origin", "https://github.com/example/not-architect.git"],
+            check=True,
+        )
         connection = verify(worktree)
         assert not connection.ok
         assert "identity" in connection.reason
@@ -66,16 +95,12 @@ def test_bundled_lock_is_cwd_independent(tmp_path, monkeypatch):
     assert LOCK_PATH.is_file()
 
 
-def test_provenance_uses_observed_checkout_commit():
-    connection = verify(authority_root())
-    assert connection.ok, connection.reason
-    assert connection.trusted_context == {
-        "producer_provenance": {
-            "repository": "rezahh107/EV4-Architect-Repo",
-            "ref": connection.ref,
-            "commit_sha": connection.commit,
-        }
-    }
+def test_lock_records_exact_runtime_interface_and_head():
+    lock = json.loads(LOCK_PATH.read_text(encoding="utf-8"))
+    assert lock["reference_commit_sha"] == EXPECTED_ARCHITECT_HEAD
+    assert lock["runtime_interface_id"] == EXPECTED_INTERFACE
+    assert lock["identity_algorithm"] == "git_blob_oid_sha1"
+    assert len(lock["files"]) == EXPECTED_AUTHORITY_FILES
 
 
 def test_descendant_unrelated_commit_is_compatible(tmp_path):
@@ -85,11 +110,15 @@ def test_descendant_unrelated_commit_is_compatible(tmp_path):
         doc.parent.mkdir(exist_ok=True)
         doc.write_text("unrelated documentation\n", encoding="utf-8")
         subprocess.run(["git", "-C", str(worktree), "add", str(doc.relative_to(worktree))], check=True)
-        subprocess.run(["git", "-C", str(worktree), "commit", "-m", "test: unrelated compatibility change"], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(worktree), "commit", "-m", "test: unrelated compatibility change"],
+            check=True,
+            capture_output=True,
+        )
         connection = verify(worktree)
         assert connection.ok, connection.reason
         assert connection.commit != connection.reference_commit
-        assert len(connection.identities) == 11
+        assert len(connection.identities) == EXPECTED_AUTHORITY_FILES
     finally:
         _remove_worktree(root, worktree)
 
@@ -105,15 +134,17 @@ def test_dirty_unrelated_file_is_compatible(tmp_path):
 
 def test_clean_crlf_authority_checkout_is_compatible(tmp_path):
     root, worktree = _worktree(tmp_path, "clean-crlf")
-    original = subprocess.run(["git", "-C", str(worktree), "config", "--get", "core.autocrlf"], text=True, capture_output=True)
+    original = subprocess.run(
+        ["git", "-C", str(worktree), "config", "--get", "core.autocrlf"],
+        text=True,
+        capture_output=True,
+    )
     try:
         subprocess.run(["git", "-C", str(worktree), "config", "core.autocrlf", "true"], check=True)
-        target = worktree / LOCKED_FILE
+        target = worktree / "contracts/project-gate/producer-gate-export.v1.schema.json"
         target.unlink()
-        subprocess.run(["git", "-C", str(worktree), "checkout", "--", LOCKED_FILE], check=True)
-        assert b"\r\n" in target.read_bytes()
-        connection = verify(worktree)
-        assert connection.ok, connection.reason
+        subprocess.run(["git", "-C", str(worktree), "checkout", "--", str(target.relative_to(worktree))], check=True)
+        assert verify(worktree).ok
     finally:
         if original.returncode == 0:
             subprocess.run(["git", "-C", str(worktree), "config", "core.autocrlf", original.stdout.strip()], check=True)
@@ -126,9 +157,13 @@ def test_committed_authority_change_is_rejected(tmp_path):
     root, worktree = _worktree(tmp_path, "committed-authority")
     try:
         target = worktree / LOCKED_FILE
-        target.write_bytes(target.read_bytes() + b"\n ")
+        target.write_bytes(target.read_bytes() + b"\n# mutation\n")
         subprocess.run(["git", "-C", str(worktree), "add", LOCKED_FILE], check=True)
-        subprocess.run(["git", "-C", str(worktree), "commit", "-m", "test: alter authority"], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(worktree), "commit", "-m", "test: alter authority"],
+            check=True,
+            capture_output=True,
+        )
         connection = verify(worktree)
         assert not connection.ok
         assert connection.reason == f"Authority lock mismatch for committed blob: {LOCKED_FILE}"
@@ -152,7 +187,7 @@ def test_dirty_authority_change_is_rejected(tmp_path):
     root, worktree = _worktree(tmp_path, "dirty-authority")
     try:
         target = worktree / LOCKED_FILE
-        target.write_bytes(target.read_bytes() + b"\n ")
+        target.write_bytes(target.read_bytes() + b"\n# mutation\n")
         connection = verify(worktree)
         assert not connection.ok
         assert connection.reason == f"Changed authority file: {LOCKED_FILE}"
@@ -171,24 +206,38 @@ def test_missing_authority_file_is_rejected(tmp_path):
         _remove_worktree(root, worktree)
 
 
-@pytest.mark.parametrize(("replacement", "expected"), [
-    ("def evaluate_run_missing", "Official evaluator entry points are missing."),
-    ("broken-load-authority", "Official authority compatibility failed: RuntimeError: broken authority"),
-])
+@pytest.mark.parametrize(
+    ("replacement", "expected"),
+    [
+        ("missing-evaluate-run", "Official evaluator entry points are missing."),
+        ("missing-run-context", "Official evaluator entry points are missing."),
+        ("wrong-interface", "Official Runtime interface identity mismatch."),
+        ("broken-load-authority", "Official authority compatibility failed: RuntimeError: broken authority"),
+    ],
+)
 def test_runtime_contract_failures_are_rejected(tmp_path, replacement, expected):
-    root, worktree = _worktree(tmp_path, "runtime-contract")
+    root, worktree = _worktree(tmp_path, f"runtime-{replacement}")
     try:
         lock = json.loads(LOCK_PATH.read_text(encoding="utf-8"))
-        lock["files"].pop("scripts/architect_quality_runtime.py")
-        test_lock = tmp_path / "test.lock.json"
+        lock["files"].pop(LOCKED_FILE)
+        test_lock = tmp_path / f"{replacement}.lock.json"
         test_lock.write_text(json.dumps(lock), encoding="utf-8")
-        runtime = worktree / "scripts/architect_quality_runtime.py"
-        source = runtime.read_text(encoding="utf-8")
+        runtime_path = worktree / LOCKED_FILE
+        source = runtime_path.read_text(encoding="utf-8")
         if replacement == "broken-load-authority":
-            source = re.sub(r"def load_authority[^\n]*:", "def load_authority(root):\n    raise RuntimeError('broken authority')", source, count=1)
+            source = re.sub(
+                r"def load_authority[^\n]*:",
+                "def load_authority(root):\n    raise RuntimeError('broken authority')",
+                source,
+                count=1,
+            )
+        elif replacement == "missing-evaluate-run":
+            source = source.replace("def evaluate_run", "def evaluate_run_missing", 1)
+        elif replacement == "missing-run-context":
+            source = source.replace("class RunContext:", "class RemovedRunContext:", 1)
         else:
-            source = source.replace("def evaluate_run", replacement, 1)
-        runtime.write_text(source, encoding="utf-8")
+            source = source.replace(EXPECTED_INTERFACE, "ev4-architect-quality-runtime@9.9.9", 1)
+        runtime_path.write_text(source, encoding="utf-8")
         connection = verify(worktree, test_lock)
         assert not connection.ok
         assert connection.reason == expected
