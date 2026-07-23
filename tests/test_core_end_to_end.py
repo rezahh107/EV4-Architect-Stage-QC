@@ -18,18 +18,21 @@ def test_public_core_prefinal_then_final(tmp_path):
  for index,value in enumerate(outputs[:11],1): (stage_dir/f'{index:02}.json').write_text(json.dumps(value),encoding='utf-8')
  terminal=tmp_path/'terminal.json';terminal.write_text(json.dumps(outputs[11]),encoding='utf-8')
  prefinal=run_prefinal_validation(stage_dir,root)
- assert prefinal.success and prefinal.code=='PREFINAL_VALID'
+ assert prefinal.success, (prefinal.code, prefinal.reason, prefinal.next_action)
+ assert prefinal.code=='PREFINAL_VALID'
  generated=prefinal.attempt_path/'generated-artifacts'
  assert {p.name for p in generated.iterdir()} >= {'architect-prefinal-qc-receipt.json','architect-prefinal-run-state.json','architect-prefinal-stage-results.json','architect-final-stage-context.json'}
  context=json.loads((generated/'architect-final-stage-context.json').read_text())
  assert 'project_gate_payload required' in context['instruction'] and 'authoritative Stage Result' in context['instruction']
  assert context['run_state']['run_id']==outputs[0]['run_id'] and context['selected_candidate_identity']==outputs[6]['decision_input']['selected_candidate_id']
  final=run_final_validation(stage_dir,terminal,root)
- assert final.success and final.code=='FINAL_VALID'
+ assert final.success, (final.code, final.reason, final.next_action)
+ assert final.code=='FINAL_VALID'
  assert {p.name for p in (final.attempt_path/'generated-artifacts').iterdir()} >= {'architect-final-run-state.json','architect-final-stage-results.json'}
 def test_terminal_without_payload_fails_official_runtime(tmp_path):
  root=authority_root(); outputs=official_outputs(root); stage_dir=tmp_path/'stages';stage_dir.mkdir()
  for index,value in enumerate(outputs[:11],1): (stage_dir/f'{index:02}.json').write_text(json.dumps(value),encoding='utf-8')
  terminal=tmp_path/'terminal.json'; bad=dict(outputs[11]);bad.pop('project_gate_payload');terminal.write_text(json.dumps(bad),encoding='utf-8')
  result=run_final_validation(stage_dir,terminal,root)
- assert not result.success and result.code=='FINAL_EVALUATION_FAILED'
+ assert not result.success, (result.code, result.reason, result.next_action)
+ assert result.code=='FINAL_EVALUATION_FAILED'
