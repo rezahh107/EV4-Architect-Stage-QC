@@ -23,7 +23,21 @@ jobs:
           $env:EV4_ARCHITECT_REPO = Join-Path $env:GITHUB_WORKSPACE "EV4-Architect-Repo"
           git -C $env:EV4_ARCHITECT_REPO rev-parse HEAD
           git -C $env:EV4_ARCHITECT_REPO status --porcelain
-          uv run python -c "from pathlib import Path; from ev4_architect_stage_qc.architect_adapter import verify; c=verify(Path('$env:EV4_ARCHITECT_REPO')); print('connection_ok:', c.ok); print('connection_reason:', c.reason); raise SystemExit(0 if c.ok else 1)"
+          @'
+          import os
+          from pathlib import Path
+
+          from ev4_architect_stage_qc.architect_adapter import verify
+
+          authority_root = Path(os.environ["EV4_ARCHITECT_REPO"])
+          connection = verify(authority_root)
+          print("authority_path:", authority_root)
+          print("path_exists:", authority_root.exists())
+          print("git_dir_exists:", (authority_root / ".git").exists())
+          print("connection_ok:", connection.ok)
+          print("connection_reason:", connection.reason)
+          raise SystemExit(0 if connection.ok else 1)
+          '@ | uv run python -
       - name: Run tests
         shell: pwsh
         run: |
