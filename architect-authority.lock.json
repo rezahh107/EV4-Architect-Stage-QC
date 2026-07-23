@@ -1,23 +1,31 @@
 {
+  "schema_version": "2.0",
+  "repository": "rezahh107/EV4-Architect-Repo",
+  "reference_commit_sha": "90503f18597a72d3764d4cb8fcc2c68b2531c85a",
+  "runtime_interface_id": "ev4-architect-quality-runtime@2.0.0",
   "compatibility_mode": "authority_file_identity",
+  "identity_algorithm": "git_blob_oid_sha1",
   "entry_points": [
+    "scripts/architect_quality_runtime.py#RunContext",
     "scripts/architect_quality_runtime.py#evaluate_stage",
     "scripts/architect_quality_runtime.py#evaluate_run"
   ],
   "files": {
-    "contracts/project-gate/producer-gate-export.v1.schema.json": "c556bb9deeccdcafeb885a1c8b3dbd660e4e06f452b8ac3c7040d21377465fcc",
-    "contracts/project-gate/stage-bundle.v1.schema.json": "fc1ec6d3f7aecbabaeb0a3455d9eb42788779d2fa1531e8c7b2cb3bde706a886",
-    "manifests/architect-pipeline-manifest.v1.json": "4b44144ab8c501e0482efd5cdb2830389cd32c0a2b6c5543d712e66a6a034148",
-    "schemas/ev4-architect-output-contract.v1.schema.json": "2363617d81c575f4dc4b7283cc5cc7f999dad05b9908340118740eef5f5772ca",
-    "schemas/ev4-architect-stage-payload.v1.schema.json": "c80c4e7764a354be0fa970707c78526d5f996e6945f2314b6fab954fec9b4aa3",
-    "schemas/ev4-architect-stage-result.v1.schema.json": "1cd319dae2e1c3b41bb80b9eb7c365814a96bc73a09b0e6bf6f0620ccc4c93e9",
-    "scripts/architect_project_gate_exporter/__init__.py": "d82575f558d789017d2470752f67d2a6949b88300a58ed7057bb16a6b365098a",
-    "scripts/architect_project_gate_exporter/base.py": "392b10a94d0c39f3b9f9c58a46e4b56ed862a042d1e70e583ddba5b4b7a190b0",
-    "scripts/architect_project_gate_exporter/contracts.py": "672857297e3b17fd02a44e8221dc5f10cd09661ca5912c612f99473c5d808c00",
-    "scripts/architect_quality_runtime.py": "aaf8b5522b90fd8c60cb3bb6537ea244e2defc367de18945d3c98f74f7226335",
-    "scripts/check-architect-stage-payload.py": "40ede2a04f54f7d647785b1253beaf87c6c5240fe28e40c98e27152807212e2d"
-  },
-  "reference_commit_sha": "338228cec0aeae951581690c3faba68f512e615c",
-  "repository": "rezahh107/EV4-Architect-Repo",
-  "schema_version": "1.2"
+    "manifests/architect-pipeline-manifest.v1.json": "ca312a5125e887b3e3bc5fdd0a3a25ea73b206a6",
+    "schemas/architect-conversational-stage-output-base.v1.schema.json": "0359cafdf06f623fd0fc4618d685beaf159a44b4",
+    "schemas/ev4-architect-stage-result.v1.schema.json": "ce9b9e101075649326a7ebea671ac647fc3e7bff",
+    "schemas/ev4-architect-stage-payload.v1.schema.json": "016f17ea53f4198fadd52199ccf1616be98536d9",
+    "contracts/project-gate/stage-bundle.v1.schema.json": "cc3005c8c10b5f737098592d9fae489385457e2b",
+    "contracts/project-gate/producer-gate-export.v1.schema.json": "14e74cc44228db8ff507c87fd3b0007dd8bb633b",
+    "scripts/architect_quality_runtime.py": "48a8e8a6047cdaf357bf2f2ed6dcf4f773758650",
+    "scripts/architect_runtime_errors.py": "c609a8f2669c44d4d40a2ddb4c8ea96d31f84841",
+    "scripts/architect_runtime_project_gate.py": "cbd6788ed316472d8bb1f1a8c113d42ee65539d1",
+    "scripts/architect_stage_claim_guard.py": "39a6c4818561a3a03a69acad418971305b5379d4",
+    "scripts/architect_runtime_payload_assembler.py": "aba6b9632e3546676a850d461d24aa3ca5f4cf65",
+    "scripts/architect_project_gate_exporter/__init__.py": "aba070d92d993b40f09bb85fb166f81ff1d2d0d3",
+    "scripts/architect_project_gate_exporter/base.py": "dfa613688cace225e72a3288c726fc7072078cfa",
+    "scripts/architect_project_gate_exporter/contracts.py": "35ce42407d1d471e34cf83cd929aa87f47bde3d6",
+    "scripts/architect_project_gate_exporter/eligibility.py": "486785382e4fb1017df0a4d460c079f7da5297e8",
+    "scripts/check-architect-stage-payload.py": "0e09ea057ae1c8d7591cc0cbbe6e8b48b8ee2d72"
+  }
 }
