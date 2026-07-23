@@ -22,7 +22,7 @@ Locked Runtime, Manifest, Schema, validator, and Project Gate contract files rem
 
 Strict JSON rejects malformed UTF-8, BOMs, duplicate keys, non-finite numbers, and non-object inputs. Raw-file SHA-256 identifies exact input/authority bytes. Canonical JSON SHA-256 identifies semantic JSON using sorted keys, compact separators, UTF-8, and `allow_nan=False`; these modes are intentionally distinct.
 
-Prefinal artifacts are deterministic. Attempt IDs, timestamps, and paths are deliberately separated into `attempt-metadata.json`. Final validation always replays all original prefinal Stage Outputs through the official evaluator, then the application invokes the official Architect exporter internally; the user never runs a terminal command. A successful publication remains in a persistent app-managed, Named-Branch Publisher worktree. The Attempt folder contains convenience copies of the official artifact and receipt.
+Prefinal artifacts are deterministic. Attempt IDs, timestamps, and paths are deliberately separated into `attempt-metadata.json`. Final validation always replays all original prefinal Stage Outputs through the official evaluator. Publication requires a ready WSL Publisher; the Windows GUI never invokes the POSIX-only exporter with native Windows Python. When WSL is unavailable, final validation remains available and reports that publication is unavailable. A successful publication remains in a persistent app-managed, Named-Branch Publisher worktree. The Attempt folder contains convenience copies of the official artifact and receipt.
 
 ## Common failures
 

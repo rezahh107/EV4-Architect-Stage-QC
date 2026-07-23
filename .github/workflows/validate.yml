@@ -5,6 +5,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/checkout@v4
         with:
           repository: rezahh107/EV4-Architect-Repo
@@ -34,14 +36,25 @@ jobs:
           print("connection_reason:", connection.reason)
           raise SystemExit(0 if connection.ok else 1)
           '@ | uv run python -
+      - name: Assert tested PR head
+        if: github.event_name == 'pull_request'
+        shell: pwsh
+        run: |
+          $actual = git rev-parse HEAD
+          Write-Host "tested_sha=$actual"
+          if ($actual -ne '${{ github.event.pull_request.head.sha }}') { throw "PR head mismatch" }
       - name: Run tests
         shell: pwsh
         run: |
           $env:PYTHONPATH = "src"
           $env:EV4_ARCHITECT_REPO = Join-Path $env:GITHUB_WORKSPACE "EV4-Architect-Repo"
           uv run pytest -q
-          uv run python -m compileall -q src
-          git diff --check
+      - name: Compile Python
+        shell: pwsh
+        run: uv run python -m compileall -q src tests
+      - name: Check patch whitespace
+        shell: pwsh
+        run: git diff --check
       - name: Verify authority compatibility across checkout changes
         shell: pwsh
         run: |
@@ -72,12 +85,21 @@ jobs:
           assert not connection.ok
           assert "Changed authority file: scripts/architect_quality_runtime.py" == connection.reason
           '@ | uv run python -
-      - name: Compile Python
-        if: always()
-        shell: pwsh
-        run: |
-          $env:PYTHONPATH = "src"
-          uv run python -m compileall -q src
-      - name: Check patch whitespace
-        shell: pwsh
-        run: git diff --check
+  linux-publisher-core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/checkout@v4
+        with:
+          repository: rezahh107/EV4-Architect-Repo
+          ref: 338228cec0aeae951581690c3faba68f512e615c
+          path: EV4-Architect-Repo
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --locked
+      - name: Linux-native publisher core tests
+        env:
+          PYTHONPATH: src
+          EV4_ARCHITECT_REPO: ${{ github.workspace }}/EV4-Architect-Repo
+        run: uv run pytest -q

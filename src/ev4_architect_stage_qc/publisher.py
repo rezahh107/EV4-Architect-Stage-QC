@@ -12,6 +12,7 @@ from pathlib import Path
 from .architect_adapter import verify
 from .json_io import atomic_write, canonical_bytes, load_strict, write_json
 from .models import PublicationLocation, PublisherResult
+from .wsl_capability import check_wsl
 
 
 def resolve_console_python() -> str:
@@ -64,6 +65,11 @@ def _parse_object(text: str, label: str) -> dict:
 
 def publish(payload: dict, run_id: str, architect_root: Path, attempt: Path, publication_root: Path | None = None) -> PublisherResult:
     """Publish only an already Runtime-validated payload through the official CLI."""
+    capability = check_wsl()
+    if os.name == "nt":
+        # The official transaction is POSIX-only. A bridge is deliberately required
+        # rather than falling back to native python.exe.
+        return PublisherResult(False, False, False, f"{capability.code}: {capability.reason}")
     source = verify(architect_root)
     if not source.ok:
         return PublisherResult(False, False, False, source.reason)
