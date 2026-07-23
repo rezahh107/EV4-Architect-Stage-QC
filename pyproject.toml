@@ -1,0 +1,18 @@
+[project]
+name = "ev4-architect-stage-qc"
+version = "0.1.0"
+description = "Local Tkinter quality-control client for EV4 Architect"
+requires-python = ">=3.11"
+dependencies = ["jsonschema>=4.22"]
+
+[project.scripts]
+ev4-architect-stage-qc = "ev4_architect_stage_qc.__main__:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
