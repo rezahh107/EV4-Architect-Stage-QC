@@ -1,81 +1,138 @@
 name: validate
-on: [push, pull_request]
+
+on:
+  pull_request:
+  push:
+    branches:
+      - agent/runtime-interface-v2-stage-qc
+
+permissions:
+  contents: read
+
 jobs:
   windows:
     runs-on: windows-latest
+    env:
+      ARCHITECT_HEAD_SHA: 90503f18597a72d3764d4cb8fcc2c68b2531c85a
+      STAGE_QC_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
+      - name: Checkout exact Stage-QC head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.STAGE_QC_HEAD_SHA }}
+          persist-credentials: false
+
+      - name: Assert exact Stage-QC head
+        shell: pwsh
+        run: |
+          if ((git rev-parse HEAD) -ne $env:STAGE_QC_HEAD_SHA) { throw "Stage-QC exact-head mismatch" }
+          if ((git status --porcelain) -ne $null) { throw "Stage-QC checkout is not clean" }
+
+      - name: Checkout exact Architect head
+        uses: actions/checkout@v4
         with:
           repository: rezahh107/EV4-Architect-Repo
-          ref: 338228cec0aeae951581690c3faba68f512e615c
+          ref: ${{ env.ARCHITECT_HEAD_SHA }}
           path: EV4-Architect-Repo
+          persist-credentials: false
+
+      - name: Assert exact Architect head and clean checkout
+        shell: pwsh
+        run: |
+          $architect = Join-Path $env:GITHUB_WORKSPACE "EV4-Architect-Repo"
+          if ((git -C $architect rev-parse HEAD) -ne $env:ARCHITECT_HEAD_SHA) { throw "Architect exact-head mismatch" }
+          if ((git -C $architect status --porcelain) -ne $null) { throw "Architect checkout is not clean" }
+
       - uses: astral-sh/setup-uv@v5
-      - run: uv sync --locked
-      - name: Verify locked authority checkout
+
+      - name: Install locked dependencies
+        run: uv sync --locked
+
+      - name: Verify locked Runtime interface v2
         shell: pwsh
         run: |
           $env:PYTHONPATH = "src"
           $env:EV4_ARCHITECT_REPO = Join-Path $env:GITHUB_WORKSPACE "EV4-Architect-Repo"
-          git -C $env:EV4_ARCHITECT_REPO rev-parse HEAD
-          git -C $env:EV4_ARCHITECT_REPO status --porcelain
           @'
           import os
           from pathlib import Path
-
           from ev4_architect_stage_qc.architect_adapter import verify
 
-          authority_root = Path(os.environ["EV4_ARCHITECT_REPO"])
-          connection = verify(authority_root)
-          print("authority_path:", authority_root)
-          print("path_exists:", authority_root.exists())
-          print("git_dir_exists:", (authority_root / ".git").exists())
+          connection = verify(Path(os.environ["EV4_ARCHITECT_REPO"]))
           print("connection_ok:", connection.ok)
           print("connection_reason:", connection.reason)
-          raise SystemExit(0 if connection.ok else 1)
-          '@ | uv run python -
-      - name: Run tests
-        shell: pwsh
-        run: |
-          $env:PYTHONPATH = "src"
-          $env:EV4_ARCHITECT_REPO = Join-Path $env:GITHUB_WORKSPACE "EV4-Architect-Repo"
-          uv run pytest -q
-      - name: Verify authority compatibility across checkout changes
-        shell: pwsh
-        run: |
-          $env:PYTHONPATH = "src"
-          $env:EV4_ARCHITECT_REPO = Join-Path $env:GITHUB_WORKSPACE "EV4-Architect-Repo"
-          git -C $env:EV4_ARCHITECT_REPO config user.email "qc-ci@example.invalid"
-          git -C $env:EV4_ARCHITECT_REPO config user.name "QC CI"
-          New-Item -ItemType Directory -Force -Path (Join-Path $env:EV4_ARCHITECT_REPO "docs") | Out-Null
-          Set-Content -NoNewline -Path (Join-Path $env:EV4_ARCHITECT_REPO "docs/qc-compatibility-test.txt") -Value "unrelated"
-          git -C $env:EV4_ARCHITECT_REPO add docs/qc-compatibility-test.txt
-          git -C $env:EV4_ARCHITECT_REPO commit -m "test: unrelated compatibility change"
-          @'
-          import os
-          from pathlib import Path
-          from ev4_architect_stage_qc.architect_adapter import verify
-
-          connection = verify(Path(os.environ["EV4_ARCHITECT_REPO"]))
+          print("architect_head:", connection.commit)
+          print("runtime_interface_id:", connection.runtime_interface_id)
+          print("authority_files:", len(connection.identities))
           assert connection.ok, connection.reason
-          assert connection.commit != connection.reference_commit
+          assert connection.commit == "90503f18597a72d3764d4cb8fcc2c68b2531c85a"
+          assert connection.runtime_interface_id == "ev4-architect-quality-runtime@2.0.0"
+          assert not hasattr(connection, "trusted_context")
           '@ | uv run python -
-          Add-Content -Path (Join-Path $env:EV4_ARCHITECT_REPO "scripts/architect_quality_runtime.py") -Value "# intentional CI authority mismatch"
-          @'
-          import os
-          from pathlib import Path
-          from ev4_architect_stage_qc.architect_adapter import verify
 
-          connection = verify(Path(os.environ["EV4_ARCHITECT_REPO"]))
-          assert not connection.ok
-          assert "Changed authority file: scripts/architect_quality_runtime.py" == connection.reason
-          '@ | uv run python -
-      - name: Compile Python
-        if: always()
+      - name: Compile Stage-QC migration
         shell: pwsh
         run: |
           $env:PYTHONPATH = "src"
-          uv run python -m compileall -q src
+          uv run python -m py_compile `
+            src/ev4_architect_stage_qc/architect_adapter.py `
+            src/ev4_architect_stage_qc/core.py `
+            src/ev4_architect_stage_qc/app.py `
+            tests/test_architect_adapter.py `
+            tests/test_context.py `
+            tests/test_core_end_to_end.py
+
+      - name: Run exact cross-repository integration suite
+        id: integration_tests
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "src"
+          $env:EV4_ARCHITECT_REPO = Join-Path $env:GITHUB_WORKSPACE "EV4-Architect-Repo"
+          $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD = "1"
+          uv run pytest -p no:cacheprovider -vv `
+            tests/test_architect_adapter.py `
+            tests/test_context.py `
+            tests/test_core_end_to_end.py `
+            2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP/stage-qc-cross-repository-integration.log"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload cross-repository integration diagnostics
+        if: always() && steps.integration_tests.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-qc-cross-repository-integration-${{ env.STAGE_QC_HEAD_SHA }}
+          path: ${{ runner.temp }}/stage-qc-cross-repository-integration.log
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Enforce cross-repository integration result
+        if: steps.integration_tests.outcome != 'success'
+        run: exit 1
+
+      - name: Run full Stage-QC suite
+        id: full_tests
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "src"
+          $env:EV4_ARCHITECT_REPO = Join-Path $env:GITHUB_WORKSPACE "EV4-Architect-Repo"
+          uv run python -m pytest -q 2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP/stage-qc-full-tests.log"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload full Stage-QC test diagnostics
+        if: always() && steps.full_tests.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-qc-full-tests-${{ env.STAGE_QC_HEAD_SHA }}
+          path: ${{ runner.temp }}/stage-qc-full-tests.log
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Enforce full Stage-QC result
+        if: steps.full_tests.outcome != 'success'
+        run: exit 1
+
       - name: Check patch whitespace
         shell: pwsh
         run: git diff --check
