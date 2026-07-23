@@ -92,37 +92,37 @@ def publish(payload: dict, run_id: str, architect_root: Path, attempt: Path, pub
         if os.name == "nt": kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         process = subprocess.run(command, **kwargs)
         diagnostics = attempt / "diagnostics"
-        receipt = None
+        receipt = None; receipt_update = None
         if process.stdout.strip():
             receipt = _parse_object(process.stdout, "historical receipt")
         location = PublicationLocation(location.publisher_worktree, location.publisher_branch, location.commit, output_path)
+        if process.stderr.strip():
+            receipt_update = _parse_object(process.stderr, "receipt update")
         if process.returncode and not (receipt and receipt.get("artifact_committed") is True):
             diagnostics.mkdir(parents=True, exist_ok=True)
             atomic_write(diagnostics / "official-export-stdout.txt", process.stdout.encode())
             atomic_write(diagnostics / "official-export-stderr.txt", process.stderr.encode())
             raise RuntimeError(f"Official exporter failed with exit code {process.returncode}.")
-        if not output_path.is_file():
+        committed = receipt and receipt.get("artifact_committed") is True and receipt.get("output_committed") is True
+        if not output_path.is_file() and not committed:
             raise RuntimeError("Official exporter exited successfully but did not create the artifact.")
-        load_strict(output_path)
+        if output_path.is_file(): load_strict(output_path)
         required = ("artifact_committed", "output_committed", "handoff_allowed", "current_revision_accepted", "canonical_destination_present")
-        committed = receipt.get("artifact_committed") is True and receipt.get("output_committed") is True
         if not committed:
             raise RuntimeError("Official receipt did not establish historical publication.")
         published = True
         if process.returncode == 2 and receipt.get("handoff_allowed") is False:
-            return PublisherResult(False, True, False, "Official artifact was committed but handoff is blocked.", location, receipt)
+            return PublisherResult(False, True, False, "Official artifact was committed but handoff is blocked.", location, receipt, receipt_update)
         if process.returncode != 0 or not all(receipt.get(key) is True for key in required) or receipt.get("acceptance_blockers"):
             raise RuntimeError("Official receipt and exporter exit status disagree about publication acceptance.")
         generated = attempt / "generated-artifacts"
         atomic_write(generated / "validated-architect-stage-payload.json", canonical_bytes(payload))
         shutil.copyfile(output_path, generated / "architect-project-gate.json")
         write_json(generated / "architect-project-gate-receipt.json", receipt)
-        if process.stderr.strip():
-            update = _parse_object(process.stderr, "receipt update")
-            write_json(generated / "architect-project-gate-receipt-update.json", update)
+        if receipt_update: write_json(generated / "architect-project-gate-receipt-update.json", receipt_update)
         if (generated / "architect-project-gate.json").read_bytes() != output_path.read_bytes():
             raise RuntimeError("Attempt artifact copy does not match official artifact bytes.")
-        return PublisherResult(True, True, False, "Official Project Gate publication completed.", location, receipt, tuple(p.name for p in generated.iterdir()))
+        return PublisherResult(True, True, False, "Official Project Gate publication completed.", location, receipt, receipt_update, tuple(p.name for p in generated.iterdir()))
     except Exception as exc:
         # A worktree containing an official artifact is evidence and must outlive the attempt.
-        return PublisherResult(False, published, published, str(exc), location, receipt)
+        return PublisherResult(False, published, published, str(exc), location, receipt, receipt_update if 'receipt_update' in locals() else None)

@@ -11,4 +11,4 @@ class PublicationLocation:
 
 @dataclass(frozen=True)
 class PublisherResult:
- success: bool; published: bool; copy_warning: bool; reason: str; location: PublicationLocation|None=None; receipt: dict|None=None; artifacts: tuple[str,...]=()
+ success: bool; published: bool; copy_warning: bool; reason: str; location: PublicationLocation|None=None; receipt: dict|None=None; receipt_update: dict|None=None; artifacts: tuple[str,...]=()
