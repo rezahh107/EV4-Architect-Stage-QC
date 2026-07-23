@@ -16,7 +16,7 @@ class Application:
   ttk.Label(f,text='EV4 Architect Stage QC',style='Title.TLabel').grid(column=0,row=0,columnspan=3,sticky='w',pady=(0,14))
   self._row(f,1,'Architect Repository',self.architect,self.select_arch,'Select Architect Repository'); ttk.Button(f,text='Verify Architect Connection',command=self.connection).grid(column=2,row=2,sticky='e',pady=(0,10))
   self._row(f,3,'Stage Output Folder',self.folder,self.select_folder,'Select Stage Folder'); ttk.Label(f,textvariable=self.status,style='Status.TLabel').grid(column=0,row=5,columnspan=3,sticky='w'); ttk.Label(f,textvariable=self.detail,wraplength=680).grid(column=0,row=6,columnspan=3,sticky='w',pady=(0,10))
-  self.pref=ttk.Button(f,text='Run Prefinal Validation',command=self.prefinal);self.pref.grid(column=0,row=7,sticky='w'); ttk.Button(f,text='Open Result Folder',command=self.open_result).grid(column=1,row=7,sticky='w');
+  self.pref=ttk.Button(f,text='Run Prefinal Validation',command=self.prefinal);self.pref.grid(column=0,row=7,sticky='w'); self.open_button=ttk.Button(f,text='Open Result Folder',command=self.open_result,state='disabled');self.open_button.grid(column=1,row=7,sticky='w');
   self._row(f,8,'Project Gate Export Stage JSON',self.terminal,self.select_terminal,'Select Final Stage JSON'); self.final=ttk.Button(f,text='Run Final Validation',command=self.final_validation);self.final.grid(column=0,row=10,sticky='w')
   for child in f.winfo_children(): child.grid_configure(padx=4)
  def _row(self,f,row,label,var,command,text):
@@ -40,12 +40,17 @@ class Application:
  def _start(self,fn,args):
   if self.active:return
   self.active=True;self.pref.configure(state='disabled');self.final.configure(state='disabled');self.status.set('ℹ Running validation'); self.detail.set('The operation is running; please wait.')
-  threading.Thread(target=lambda:self.q.put(fn(*args)),daemon=True).start()
+  threading.Thread(target=self._worker,args=(fn,args),daemon=True).start()
+ def _worker(self,fn,args):
+  try:self.q.put(fn(*args))
+  except Exception as exc:
+   from .models import CoreResult
+   self.q.put(CoreResult(False,None,'INTERNAL_APPLICATION_ERROR',f'Unexpected application error: {type(exc).__name__}: {exc}','Review inputs and retry.'))
  def prefinal(self): self._start(run_prefinal_validation,(Path(self.folder.get()),Path(self.architect.get())))
  def final_validation(self): self._start(run_final_validation,(Path(self.folder.get()),Path(self.terminal.get()),Path(self.architect.get())))
  def _poll(self):
   try:
-   r=self.q.get_nowait();self.active=False;self.pref.configure(state='normal');self.final.configure(state='normal');self.last_attempt=r.attempt_path;self.status.set('✓ Validation completed successfully' if r.success else '✕ Validation failed');self.detail.set(f'{r.code}: {r.reason}\nNext action: {r.next_action}')
+   r=self.q.get_nowait();self.active=False;self.pref.configure(state='normal');self.final.configure(state='normal');self.last_attempt=r.attempt_path;self.open_button.configure(state='normal' if r.attempt_path else 'disabled');self.status.set('✓ Validation completed successfully' if r.success else '✕ Validation failed');self.detail.set(f'{r.code}: {r.reason}\nNext action: {r.next_action}')
   except queue.Empty:pass
   self.root.after(100,self._poll)
  def open_result(self):

@@ -19,8 +19,9 @@ def _record(attempt, code, reason, action, success=False, artifacts=()):
  atomic_write(attempt/'execution-summary.txt',f'{code}: {reason}\nNext action: {action}\n'.encode())
  write_json(attempt/'attempt-metadata.json',{'schema_version':'1.0','application_version':APP_VERSION,'attempt_id':attempt.name,'started_at_utc':_utc(),'attempt_path':str(attempt)})
  return CoreResult(success,attempt,code,reason,action,tuple(artifacts))
-def _discover(folder, manifest):
- files=sorted((p for p in folder.iterdir() if p.is_file() and p.suffix.casefold()=='.json'),key=lambda p:p.name.casefold())
+def _discover(folder, manifest, excluded: set[Path] | None = None):
+ excluded={item.resolve() for item in (excluded or set())}
+ files=sorted((p for p in folder.iterdir() if p.is_file() and p.suffix.casefold()=='.json' and p.resolve() not in excluded),key=lambda p:p.name.casefold())
  outputs=[]; seen={}
  for p in files:
   value=load_strict(p)
@@ -51,7 +52,7 @@ def _snapshot(attempt, entries, terminal=None):
  return copied,terminal
 def _context(conn, outputs, run):
  state=run['run_state']; by={v['stage_id']:v for v in outputs}
- return {'context_schema_version':'1.0','authority':{'repository':'rezahh107/EV4-Architect-Repo','commit':conn.commit,'raw_file_sha256':conn.identities},'receipt':{'run_status':run['status'],'stages_visited':run['stages_visited'],'semantic_digest':canonical_sha256(run)},'run_state':state,'stage_results':run['results'],'validated_stage_outputs':outputs,'selected_candidate_identity':state.get('selected_candidate_id'),'candidate_lock_state':state.get('selected_candidate_locked'),'build_tree_content':by.get('/build-tree',{}).get('canonical_content'),'implementation_content':by.get('/implementation',{}).get('canonical_content'),'active_and_resolved_unknowns':state.get('unknown_ledger',[]),'final_audit_findings':by.get('/final-audit',{}).get('final_audit_findings',[]),'handoff_export_content':by.get('/handoff-export',{}),'terminal_stage':{'stage_id':'/project-gate-export','stage_version':conn.runtime.load_authority(conn.path)[0]['project_execution_stages'][-1]['stage_version']},'instruction':'Generate a Stage Output only. Do not generate an authoritative Stage Result, PASS claim, or project_gate_payload.' ,'content_identities':{'stage_outputs_canonical_sha256':canonical_sha256(outputs),'run_canonical_sha256':canonical_sha256(run)}}
+ return {'context_schema_version':'1.0','authority':{'repository':'rezahh107/EV4-Architect-Repo','commit':conn.commit,'raw_file_sha256':conn.identities},'receipt':{'run_status':run['status'],'stages_visited':run['stages_visited'],'semantic_digest':canonical_sha256(run)},'run_state':state,'stage_results':run['results'],'validated_stage_outputs':outputs,'selected_candidate_identity':state.get('selected_candidate_id'),'candidate_lock_state':state.get('selected_candidate_locked'),'build_tree_content':by.get('/build-tree',{}).get('canonical_content'),'implementation_content':by.get('/implementation',{}).get('canonical_content'),'active_and_resolved_unknowns':state.get('unknown_ledger',[]),'final_audit_findings':by.get('/final-audit',{}).get('final_audit_findings',[]),'handoff_export_content':by.get('/handoff-export',{}),'terminal_stage':{'stage_id':'/project-gate-export','stage_version':conn.runtime.load_authority(conn.path)[0]['project_execution_stages'][-1]['stage_version']},'instruction':'Generate exactly one /project-gate-export Stage Output for this Run. The Stage Output must contain the actual project_gate_payload required by the official Architect Runtime and preserve the supplied run identity, selected candidate, validated architecture content, active unknowns, findings, and handoff boundaries. Do not generate or claim an authoritative Stage Result, PASS, next_stage, continuation authorization, caller-authored digest, canonical_payload_valid, legacy_export_substituted, or any other evaluator-owned authority field.' ,'content_identities':{'stage_outputs_canonical_sha256':canonical_sha256(outputs),'run_canonical_sha256':canonical_sha256(run)}}
 def run_prefinal_validation(stage_folder:Path, architect_root:Path):
  attempt=_attempt(Path(stage_folder))
  conn=verify(architect_root)
@@ -68,7 +69,7 @@ def run_final_validation(stage_folder:Path, terminal_path:Path, architect_root:P
  attempt=_attempt(Path(stage_folder)); conn=verify(architect_root)
  if not conn.ok:return _record(attempt,'ARCHITECT_CONNECTION_INVALID',conn.reason,'Select a compatible local Architect repository.')
  try:
-  manifest,_=conn.runtime.load_authority(conn.path); entries=_discover(Path(stage_folder),manifest); snap,terminal=_snapshot(attempt,entries,Path(terminal_path)); outputs=[v for _,v in snap]
+  manifest,_=conn.runtime.load_authority(conn.path); entries=_discover(Path(stage_folder),manifest,{Path(terminal_path)}); snap,terminal=_snapshot(attempt,entries,Path(terminal_path)); outputs=[v for _,v in snap]
   expected=manifest['project_execution_stages'][-1]
   if terminal.get('run_id')!=outputs[0]['run_id']:raise ValueError('terminal run_id does not match prefinal run')
   if terminal.get('stage_id')!=expected['stage_id'] or terminal.get('stage_version')!=expected['stage_version']:raise ValueError('terminal Stage identity/version does not match manifest')
