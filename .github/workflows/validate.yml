@@ -40,6 +40,8 @@ jobs:
           $env:PYTHONPATH = "src"
           $env:EV4_ARCHITECT_REPO = Join-Path $env:GITHUB_WORKSPACE "EV4-Architect-Repo"
           uv run pytest -q
+          uv run python -m compileall -q src
+          git diff --check
       - name: Verify authority compatibility across checkout changes
         shell: pwsh
         run: |
