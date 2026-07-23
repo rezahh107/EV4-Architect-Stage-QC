@@ -1,82 +1,312 @@
 from __future__ import annotations
-import shutil
-from datetime import datetime,timezone
-from pathlib import Path
-from .architect_adapter import verify
-from .json_io import load_strict,raw_sha256,canonical_sha256,write_json,atomic_write
-from .models import CoreResult
-APP_VERSION='0.1.0'
-def _utc(): return datetime.now(timezone.utc).isoformat().replace('+00:00','Z')
-def _attempt(folder:Path):
- base=folder/'results'; base.mkdir(parents=True,exist_ok=True)
- for n in range(1,1000000):
-  p=base/f'attempt-{n:04d}'
-  try:p.mkdir(); (p/'input-snapshot').mkdir(); (p/'generated-artifacts').mkdir(); return p
-  except FileExistsError:continue
- raise RuntimeError('No attempt directory available')
-def _record(attempt, code, reason, action, success=False, artifacts=()):
- write_json(attempt/'diagnostics.json',{'code':code,'reason':reason,'next_action':action})
- atomic_write(attempt/'execution-summary.txt',f'{code}: {reason}\nNext action: {action}\n'.encode())
- write_json(attempt/'attempt-metadata.json',{'schema_version':'1.0','application_version':APP_VERSION,'attempt_id':attempt.name,'started_at_utc':_utc(),'attempt_path':str(attempt)})
- return CoreResult(success,attempt,code,reason,action,tuple(artifacts))
-def _discover(folder, manifest, excluded: set[Path] | None = None):
- excluded={item.resolve() for item in (excluded or set())}
- files=sorted((p for p in folder.iterdir() if p.is_file() and p.suffix.casefold()=='.json' and p.resolve() not in excluded),key=lambda p:p.name.casefold())
- outputs=[]; seen={}
- for p in files:
-  value=load_strict(p)
-  for key in ('stage_id','stage_version','run_id'):
-   if not value.get(key): raise ValueError(f'{p.name}: missing required identity field {key}')
-  stage=value['stage_id']
-  if stage in seen: raise ValueError(f'duplicate Stage Output for {stage}: {seen[stage].name}, {p.name}')
-  seen[stage]=p; outputs.append((p,value))
- stages=manifest['project_execution_stages']; pre=stages[:-1]; expected=[x['stage_id'] for x in pre]
- extras=sorted(set(seen)-set(expected))
- if extras: raise ValueError(f'unexpected Stage Output(s): {", ".join(extras)}')
- missing=[x for x in expected if x not in seen]
- if missing: raise ValueError(f'missing mandatory Stage Output(s): {", ".join(missing)}')
- run_ids={v['run_id'] for _,v in outputs}
- if len(run_ids)!=1: raise ValueError('Stage Outputs do not share one run_id')
- ordered=[]
- for stage in pre:
-  p=seen[stage['stage_id']]; v=next(v for q,v in outputs if q==p)
-  if v['stage_version']!=stage['stage_version']: raise ValueError(f'{p.name}: stage version does not match manifest')
-  ordered.append((p,v))
- return ordered
-def _snapshot(attempt, entries, terminal=None):
- copied=[]
- for path,_ in entries:
-  target=attempt/'input-snapshot'/path.name; shutil.copyfile(path,target); copied.append((target,load_strict(target)))
- if terminal:
-  target=attempt/'input-snapshot'/f'terminal-{terminal.name}'; shutil.copyfile(terminal,target); terminal=load_strict(target)
- return copied,terminal
-def _context(conn, outputs, run):
- state=run['run_state']; by={v['stage_id']:v for v in outputs}
- return {'context_schema_version':'1.0','authority':{'repository':'rezahh107/EV4-Architect-Repo','commit':conn.commit,'observed_commit_sha':conn.commit,'reference_commit_sha':getattr(conn,'reference_commit',None),'compatibility_mode':getattr(conn,'compatibility_mode',None),'authority_files_verified':len(conn.identities),'ref':getattr(conn,'ref','verified-authority-files'),'raw_file_sha256':conn.identities},'receipt':{'run_status':run['status'],'stages_visited':run['stages_visited'],'semantic_digest':canonical_sha256(run)},'run_state':state,'stage_results':run['results'],'validated_stage_outputs':outputs,'selected_candidate_identity':state.get('selected_candidate_id'),'candidate_lock_state':state.get('selected_candidate_locked'),'build_tree_content':by.get('/build-tree',{}).get('canonical_content'),'implementation_content':by.get('/implementation',{}).get('canonical_content'),'active_and_resolved_unknowns':state.get('unknown_ledger',[]),'final_audit_findings':by.get('/final-audit',{}).get('final_audit_findings',[]),'handoff_export_content':by.get('/handoff-export',{}),'terminal_stage':{'stage_id':'/project-gate-export','stage_version':conn.runtime.load_authority(conn.path)[0]['project_execution_stages'][-1]['stage_version']},'instruction':'Generate exactly one /project-gate-export Stage Output for this Run. The Stage Output must contain the actual project_gate_payload required by the official Architect Runtime and preserve the supplied run identity, selected candidate, validated architecture content, active unknowns, findings, and handoff boundaries. Do not generate or claim an authoritative Stage Result, PASS, next_stage, continuation authorization, caller-authored digest, canonical_payload_valid, legacy_export_substituted, or any other evaluator-owned authority field.' ,'content_identities':{'stage_outputs_canonical_sha256':canonical_sha256(outputs),'run_canonical_sha256':canonical_sha256(run)}}
-def run_prefinal_validation(stage_folder:Path, architect_root:Path):
- attempt=_attempt(Path(stage_folder))
- conn=verify(architect_root)
- if not conn.ok:return _record(attempt,'ARCHITECT_CONNECTION_INVALID',conn.reason,'Select a compatible local Architect repository.')
- try:
-  manifest,_=conn.runtime.load_authority(conn.path); entries=_discover(Path(stage_folder),manifest); snap,_=_snapshot(attempt,entries); outputs=[v for _,v in snap]
-  run=conn.runtime.evaluate_run(outputs,root=conn.path,require_terminal=False)
-  if run['status']!='valid':return _record(attempt,'PREFINAL_EVALUATION_FAILED','; '.join(run['errors']),'Repair the reported Stage Output and run again.')
-  context=_context(conn,outputs,run); artifacts={'architect-prefinal-qc-receipt.json':context['receipt'],'architect-prefinal-run-state.json':run['run_state'],'architect-prefinal-stage-results.json':run['results'],'architect-final-stage-context.json':context}
-  for name,value in artifacts.items():write_json(attempt/'generated-artifacts'/name,value)
-  return _record(attempt,'PREFINAL_VALID','Official prefinal evaluation passed.','Give architect-final-stage-context.json to the model.',True,artifacts)
- except Exception as e:return _record(attempt,'PREFINAL_INPUT_INVALID',str(e),'Correct the Stage Output folder and run again.')
-def run_final_validation(stage_folder:Path, terminal_path:Path, architect_root:Path):
- attempt=_attempt(Path(stage_folder)); conn=verify(architect_root)
- if not conn.ok:return _record(attempt,'ARCHITECT_CONNECTION_INVALID',conn.reason,'Select a compatible local Architect repository.')
- try:
-  manifest,_=conn.runtime.load_authority(conn.path); entries=_discover(Path(stage_folder),manifest,{Path(terminal_path)}); snap,terminal=_snapshot(attempt,entries,Path(terminal_path)); outputs=[v for _,v in snap]
-  expected=manifest['project_execution_stages'][-1]
-  if terminal.get('run_id')!=outputs[0]['run_id']:raise ValueError('terminal run_id does not match prefinal run')
-  if terminal.get('stage_id')!=expected['stage_id'] or terminal.get('stage_version')!=expected['stage_version']:raise ValueError('terminal Stage identity/version does not match manifest')
 
-  if conn.trusted_context is None:return _record(attempt,'ARCHITECT_CONNECTION_INVALID','Verified Architect connection has no trusted producer provenance.','Verify the Architect connection and retry.')
-  run=conn.runtime.evaluate_run([*outputs,terminal],root=conn.path,require_terminal=True,trusted_context=conn.trusted_context)
-  if run['status']!='valid':return _record(attempt,'FINAL_EVALUATION_FAILED','; '.join(run['errors']),'Repair the terminal Stage Output or upstream evidence and run again.')
-  write_json(attempt/'generated-artifacts'/'architect-final-run-state.json',run['run_state']); write_json(attempt/'generated-artifacts'/'architect-final-stage-results.json',run['results'])
-  return _record(attempt,'FINAL_VALID','Official terminal evaluation and export validation passed.','Open the final result folder.',True,('architect-final-run-state.json','architect-final-stage-results.json'))
- except Exception as e:return _record(attempt,'FINAL_INPUT_INVALID',str(e),'Correct the input files and run again.')
+import shutil
+from datetime import datetime, timezone
+from pathlib import Path
+
+from .architect_adapter import verify
+from .json_io import atomic_write, canonical_sha256, load_strict, write_json
+from .models import CoreResult
+
+APP_VERSION = "0.2.0"
+
+
+def _utc():
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _attempt(folder: Path):
+    base = folder / "results"
+    base.mkdir(parents=True, exist_ok=True)
+    for number in range(1, 1_000_000):
+        path = base / f"attempt-{number:04d}"
+        try:
+            path.mkdir()
+            (path / "input-snapshot").mkdir()
+            (path / "generated-artifacts").mkdir()
+            return path
+        except FileExistsError:
+            continue
+    raise RuntimeError("No attempt directory available")
+
+
+def _record(attempt, code, reason, action, success=False, artifacts=()):
+    write_json(attempt / "diagnostics.json", {"code": code, "reason": reason, "next_action": action})
+    atomic_write(
+        attempt / "execution-summary.txt",
+        f"{code}: {reason}\nNext action: {action}\n".encode(),
+    )
+    write_json(
+        attempt / "attempt-metadata.json",
+        {
+            "schema_version": "1.0",
+            "application_version": APP_VERSION,
+            "attempt_id": attempt.name,
+            "started_at_utc": _utc(),
+            "attempt_path": str(attempt),
+        },
+    )
+    return CoreResult(success, attempt, code, reason, action, tuple(artifacts))
+
+
+def _discover(folder, manifest, excluded: set[Path] | None = None):
+    excluded = {item.resolve() for item in (excluded or set())}
+    files = sorted(
+        (
+            path
+            for path in folder.iterdir()
+            if path.is_file()
+            and path.suffix.casefold() == ".json"
+            and path.resolve() not in excluded
+        ),
+        key=lambda path: path.name.casefold(),
+    )
+    outputs = []
+    seen = {}
+    for path in files:
+        value = load_strict(path)
+        for key in ("stage_id", "stage_version", "run_id"):
+            if not value.get(key):
+                raise ValueError(f"{path.name}: missing required identity field {key}")
+        stage = value["stage_id"]
+        if stage in seen:
+            raise ValueError(
+                f"duplicate Stage Output for {stage}: {seen[stage].name}, {path.name}"
+            )
+        seen[stage] = path
+        outputs.append((path, value))
+    stages = manifest["project_execution_stages"]
+    prefinal = stages[:-1]
+    expected = [item["stage_id"] for item in prefinal]
+    extras = sorted(set(seen) - set(expected))
+    if extras:
+        raise ValueError(f"unexpected Stage Output(s): {', '.join(extras)}")
+    missing = [item for item in expected if item not in seen]
+    if missing:
+        raise ValueError(f"missing mandatory Stage Output(s): {', '.join(missing)}")
+    run_ids = {value["run_id"] for _, value in outputs}
+    if len(run_ids) != 1:
+        raise ValueError("Stage Outputs do not share one run_id")
+    ordered = []
+    by_stage = {value["stage_id"]: (path, value) for path, value in outputs}
+    for stage in prefinal:
+        path, value = by_stage[stage["stage_id"]]
+        if value["stage_version"] != stage["stage_version"]:
+            raise ValueError(f"{path.name}: stage version does not match manifest")
+        ordered.append((path, value))
+    return ordered
+
+
+def _snapshot(attempt, entries, terminal=None):
+    copied = []
+    for path, _ in entries:
+        target = attempt / "input-snapshot" / path.name
+        shutil.copyfile(path, target)
+        copied.append((target, load_strict(target)))
+    if terminal:
+        target = attempt / "input-snapshot" / f"terminal-{terminal.name}"
+        shutil.copyfile(terminal, target)
+        terminal = load_strict(target)
+    return copied, terminal
+
+
+def _run_context(connection, source_kind: str):
+    return connection.runtime.RunContext(source_kind=source_kind)
+
+
+def _context(connection, outputs, run, source_kind: str):
+    state = run["run_state"]
+    by_stage = {value["stage_id"]: value for value in outputs}
+    return {
+        "context_schema_version": "2.0",
+        "runtime_interface_id": connection.runtime_interface_id,
+        "execution_context": {
+            "source_kind": source_kind,
+            "synthetic": source_kind != "live_conversation",
+        },
+        "authority": {
+            "repository": "rezahh107/EV4-Architect-Repo",
+            "commit": connection.commit,
+            "observed_commit_sha": connection.commit,
+            "reference_commit_sha": connection.reference_commit,
+            "compatibility_mode": connection.compatibility_mode,
+            "authority_files_verified": len(connection.identities),
+            "ref": connection.ref,
+            "committed_blob_oids": connection.identities,
+        },
+        "receipt": {
+            "run_status": run["status"],
+            "stages_visited": run["stages_visited"],
+            "semantic_digest": canonical_sha256(run),
+        },
+        "run_state": state,
+        "stage_results": run["results"],
+        "validated_stage_outputs": outputs,
+        "selected_candidate_identity": state.get("selected_candidate_id"),
+        "candidate_lock_state": state.get("selected_candidate_locked"),
+        "build_tree_content": by_stage.get("/build-tree", {}).get("canonical_content"),
+        "implementation_content": by_stage.get("/implementation", {}).get("canonical_content"),
+        "active_and_resolved_unknowns": state.get("unknown_ledger", []),
+        "final_audit_findings": by_stage.get("/final-audit", {}).get("final_audit_findings", []),
+        "handoff_export_content": by_stage.get("/handoff-export", {}),
+        "terminal_stage": {
+            "stage_id": "/project-gate-export",
+            "stage_version": connection.runtime.load_authority(connection.path)[0][
+                "project_execution_stages"
+            ][-1]["stage_version"],
+        },
+        "instruction": (
+            "Generate exactly one /project-gate-export Stage Output request for this Run. "
+            "Preserve the supplied run identity and selected Candidate. Do not generate "
+            "project_gate_payload, Runtime Context, producer provenance, official digests, "
+            "completion_class, stage_status, next_stage, canonical_payload_valid, "
+            "legacy_export_substituted, functional eligibility, or handoff_allowed. "
+            "The Architect Runtime will assemble and validate the canonical terminal Payload."
+        ),
+        "content_identities": {
+            "stage_outputs_canonical_sha256": canonical_sha256(outputs),
+            "run_canonical_sha256": canonical_sha256(run),
+        },
+    }
+
+
+def run_prefinal_validation(
+    stage_folder: Path,
+    architect_root: Path,
+    *,
+    source_kind: str = "live_conversation",
+):
+    attempt = _attempt(Path(stage_folder))
+    connection = verify(architect_root)
+    if not connection.ok:
+        return _record(
+            attempt,
+            "ARCHITECT_CONNECTION_INVALID",
+            connection.reason,
+            "Select a compatible local Architect repository.",
+        )
+    try:
+        manifest, _ = connection.runtime.load_authority(connection.path)
+        entries = _discover(Path(stage_folder), manifest)
+        snapshot, _ = _snapshot(attempt, entries)
+        outputs = [value for _, value in snapshot]
+        run = connection.runtime.evaluate_run(
+            outputs,
+            root=connection.path,
+            require_terminal=False,
+            run_context=_run_context(connection, source_kind),
+        )
+        if run["status"] != "valid":
+            return _record(
+                attempt,
+                "PREFINAL_EVALUATION_FAILED",
+                "; ".join(run["errors"]),
+                "Repair the reported Stage Output and run again.",
+            )
+        context = _context(connection, outputs, run, source_kind)
+        artifacts = {
+            "architect-prefinal-qc-receipt.json": context["receipt"],
+            "architect-prefinal-run-state.json": run["run_state"],
+            "architect-prefinal-stage-results.json": run["results"],
+            "architect-final-stage-context.json": context,
+        }
+        for name, value in artifacts.items():
+            write_json(attempt / "generated-artifacts" / name, value)
+        return _record(
+            attempt,
+            "PREFINAL_VALID",
+            "Official prefinal evaluation passed.",
+            "Give architect-final-stage-context.json to the model.",
+            True,
+            artifacts,
+        )
+    except (OSError, ValueError) as exc:
+        return _record(
+            attempt,
+            "PREFINAL_INPUT_INVALID",
+            str(exc),
+            "Correct the Stage Output folder and run again.",
+        )
+
+
+def run_final_validation(
+    stage_folder: Path,
+    terminal_path: Path,
+    architect_root: Path,
+    *,
+    source_kind: str = "live_conversation",
+):
+    attempt = _attempt(Path(stage_folder))
+    connection = verify(architect_root)
+    if not connection.ok:
+        return _record(
+            attempt,
+            "ARCHITECT_CONNECTION_INVALID",
+            connection.reason,
+            "Select a compatible local Architect repository.",
+        )
+    try:
+        manifest, _ = connection.runtime.load_authority(connection.path)
+        entries = _discover(Path(stage_folder), manifest, {Path(terminal_path)})
+        snapshot, terminal = _snapshot(attempt, entries, Path(terminal_path))
+        outputs = [value for _, value in snapshot]
+        expected = manifest["project_execution_stages"][-1]
+        if terminal.get("run_id") != outputs[0]["run_id"]:
+            raise ValueError("terminal run_id does not match prefinal run")
+        if (
+            terminal.get("stage_id") != expected["stage_id"]
+            or terminal.get("stage_version") != expected["stage_version"]
+        ):
+            raise ValueError("terminal Stage identity/version does not match manifest")
+        run = connection.runtime.evaluate_run(
+            [*outputs, terminal],
+            root=connection.path,
+            require_terminal=True,
+            run_context=_run_context(connection, source_kind),
+        )
+        if run["status"] != "valid":
+            return _record(
+                attempt,
+                "FINAL_EVALUATION_FAILED",
+                "; ".join(run["errors"]),
+                "Repair the terminal Stage Output or upstream evidence and run again.",
+            )
+        terminal_result = run["results"][-1]
+        export = terminal_result.get("project_gate_export")
+        if not isinstance(export, dict) or export.get("canonical_payload_valid") is not True:
+            raise ValueError("Runtime did not return a valid terminal Project Gate export")
+        if source_kind == "live_conversation" and export.get("handoff_allowed") is not True:
+            return _record(
+                attempt,
+                "FINAL_HANDOFF_BLOCKED",
+                "Live Runtime evaluation did not authorize handoff.",
+                "Resolve the Runtime-derived Payload blockers and run again.",
+            )
+        if source_kind != "live_conversation" and (
+            export.get("handoff_allowed") is not False
+            or export.get("functional_eligibility", {}).get("would_allow") is not True
+        ):
+            raise ValueError("Synthetic Runtime handoff semantics are inconsistent")
+        artifacts = {
+            "architect-final-run-state.json": run["run_state"],
+            "architect-final-stage-results.json": run["results"],
+            "architect-runtime-issued-payload.json": export["runtime_issued_payload"],
+            "architect-project-gate-export.json": export,
+        }
+        for name, value in artifacts.items():
+            write_json(attempt / "generated-artifacts" / name, value)
+        return _record(
+            attempt,
+            "FINAL_VALID",
+            "Official terminal evaluation and Runtime-issued export validation passed.",
+            "Open the final result folder.",
+            True,
+            artifacts,
+        )
+    except (OSError, ValueError) as exc:
+        return _record(
+            attempt,
+            "FINAL_INPUT_INVALID",
+            str(exc),
+            "Correct the input files and run again.",
+        )
