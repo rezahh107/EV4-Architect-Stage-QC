@@ -6,12 +6,14 @@ from pathlib import Path
 
 import pytest
 
+import ev4_architect_stage_qc.architect_adapter as adapter
 from ev4_architect_stage_qc.architect_adapter import LOCK_PATH, verify
 
 LOCKED_FILE = "scripts/architect_quality_runtime.py"
-EXPECTED_ARCHITECT_HEAD = "0e6f846357eba7605b47a6e7130c45cb57eeb4e9"
+EXPECTED_ARCHITECT_HEAD = "5eecc46ab0bf8a48a94714558706dd3f3e7b2faf"
 EXPECTED_INTERFACE = "ev4-architect-quality-runtime@2.0.0"
-EXPECTED_AUTHORITY_FILES = 16
+EXPECTED_AUTHORITY_FILES = 18
+BYTE_MISMATCH_REASON = f"Authority working-tree bytes differ from committed blob: {LOCKED_FILE}"
 
 
 def authority_root():
@@ -30,8 +32,14 @@ def _worktree(tmp_path, name):
         check=True,
         capture_output=True,
     )
-    subprocess.run(["git", "-C", str(worktree), "config", "user.email", "qc@example.invalid"], check=True)
-    subprocess.run(["git", "-C", str(worktree), "config", "user.name", "QC compatibility test"], check=True)
+    subprocess.run(
+        ["git", "-C", str(worktree), "config", "user.email", "qc@example.invalid"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(worktree), "config", "user.name", "QC compatibility test"],
+        check=True,
+    )
     return root, worktree
 
 
@@ -46,6 +54,31 @@ def _remove_worktree(root, worktree):
         check=True,
         capture_output=True,
     )
+
+
+def _set_index_flag(worktree: Path, flag: str, enabled: bool) -> None:
+    option = f"--{flag}" if enabled else f"--no-{flag}"
+    subprocess.run(
+        ["git", "-C", str(worktree), "update-index", option, LOCKED_FILE],
+        check=True,
+        capture_output=True,
+    )
+
+
+def _assert_rejected_before_import(worktree: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    imported = False
+
+    def fail_if_imported(*args, **kwargs):
+        nonlocal imported
+        imported = True
+        raise AssertionError("Runtime import must not be attempted after authority byte mismatch")
+
+    monkeypatch.setattr(adapter.importlib.util, "spec_from_file_location", fail_if_imported)
+    connection = verify(worktree)
+    assert not connection.ok
+    assert connection.reason == BYTE_MISMATCH_REASON
+    assert imported is False
+    assert connection.runtime is None
 
 
 def test_reference_checkout_loads_runtime_interface_v2():
@@ -75,18 +108,30 @@ def test_wrong_checkout_blocks(tmp_path):
 def test_wrong_repository_origin_is_rejected(tmp_path):
     root, worktree = _worktree(tmp_path, "wrong-origin")
     original = subprocess.check_output(
-        ["git", "-C", str(worktree), "config", "--get", "remote.origin.url"], text=True
+        ["git", "-C", str(worktree), "config", "--get", "remote.origin.url"],
+        text=True,
     ).strip()
     try:
         subprocess.run(
-            ["git", "-C", str(worktree), "remote", "set-url", "origin", "https://github.com/example/not-architect.git"],
+            [
+                "git",
+                "-C",
+                str(worktree),
+                "remote",
+                "set-url",
+                "origin",
+                "https://github.com/example/not-architect.git",
+            ],
             check=True,
         )
         connection = verify(worktree)
         assert not connection.ok
         assert "identity" in connection.reason
     finally:
-        subprocess.run(["git", "-C", str(worktree), "remote", "set-url", "origin", original], check=True)
+        subprocess.run(
+            ["git", "-C", str(worktree), "remote", "set-url", "origin", original],
+            check=True,
+        )
         _remove_worktree(root, worktree)
 
 
@@ -101,6 +146,8 @@ def test_lock_records_exact_runtime_interface_and_head():
     assert lock["runtime_interface_id"] == EXPECTED_INTERFACE
     assert lock["identity_algorithm"] == "git_blob_oid_sha1"
     assert len(lock["files"]) == EXPECTED_AUTHORITY_FILES
+    assert "scripts/architect_build_tree_validation.py" in lock["files"]
+    assert "scripts/architect_payload_derivation_validation.py" in lock["files"]
 
 
 def test_descendant_unrelated_commit_is_compatible(tmp_path):
@@ -109,7 +156,10 @@ def test_descendant_unrelated_commit_is_compatible(tmp_path):
         doc = worktree / "docs/qc-compatibility-test.txt"
         doc.parent.mkdir(exist_ok=True)
         doc.write_text("unrelated documentation\n", encoding="utf-8")
-        subprocess.run(["git", "-C", str(worktree), "add", str(doc.relative_to(worktree))], check=True)
+        subprocess.run(
+            ["git", "-C", str(worktree), "add", str(doc.relative_to(worktree))],
+            check=True,
+        )
         subprocess.run(
             ["git", "-C", str(worktree), "commit", "-m", "test: unrelated compatibility change"],
             check=True,
@@ -132,24 +182,17 @@ def test_dirty_unrelated_file_is_compatible(tmp_path):
         _remove_worktree(root, worktree)
 
 
-def test_clean_crlf_authority_checkout_is_compatible(tmp_path):
-    root, worktree = _worktree(tmp_path, "clean-crlf")
-    original = subprocess.run(
-        ["git", "-C", str(worktree), "config", "--get", "core.autocrlf"],
-        text=True,
-        capture_output=True,
-    )
+def test_line_ending_only_authority_change_is_rejected(tmp_path):
+    root, worktree = _worktree(tmp_path, "line-ending")
     try:
-        subprocess.run(["git", "-C", str(worktree), "config", "core.autocrlf", "true"], check=True)
-        target = worktree / "contracts/project-gate/producer-gate-export.v1.schema.json"
-        target.unlink()
-        subprocess.run(["git", "-C", str(worktree), "checkout", "--", str(target.relative_to(worktree))], check=True)
-        assert verify(worktree).ok
+        target = worktree / LOCKED_FILE
+        original = target.read_bytes()
+        assert b"\n" in original
+        target.write_bytes(original.replace(b"\n", b"\r\n"))
+        connection = verify(worktree)
+        assert not connection.ok
+        assert connection.reason == BYTE_MISMATCH_REASON
     finally:
-        if original.returncode == 0:
-            subprocess.run(["git", "-C", str(worktree), "config", "core.autocrlf", original.stdout.strip()], check=True)
-        else:
-            subprocess.run(["git", "-C", str(worktree), "config", "--unset-all", "core.autocrlf"], check=False)
         _remove_worktree(root, worktree)
 
 
@@ -173,9 +216,11 @@ def test_committed_authority_change_is_rejected(tmp_path):
 
 @pytest.mark.parametrize("attribute", ["filter=unsafe", "working-tree-encoding=UTF-16", "ident"])
 def test_unsafe_authority_git_attribute_is_rejected(tmp_path, attribute):
-    root, worktree = _worktree(tmp_path, "unsafe-attribute")
+    root, worktree = _worktree(tmp_path, f"unsafe-{attribute.split('=')[0]}")
     try:
-        (worktree / ".gitattributes").write_text(f"{LOCKED_FILE} {attribute}\n", encoding="utf-8")
+        (worktree / ".gitattributes").write_text(
+            f"{LOCKED_FILE} {attribute}\n", encoding="utf-8"
+        )
         connection = verify(worktree)
         assert not connection.ok
         assert connection.reason.startswith(f"Unsafe authority Git attribute: {LOCKED_FILE}:")
@@ -183,15 +228,51 @@ def test_unsafe_authority_git_attribute_is_rejected(tmp_path, attribute):
         _remove_worktree(root, worktree)
 
 
-def test_dirty_authority_change_is_rejected(tmp_path):
+def test_dirty_authority_change_is_rejected_before_import(tmp_path, monkeypatch):
     root, worktree = _worktree(tmp_path, "dirty-authority")
     try:
         target = worktree / LOCKED_FILE
         target.write_bytes(target.read_bytes() + b"\n# mutation\n")
-        connection = verify(worktree)
-        assert not connection.ok
-        assert connection.reason == f"Changed authority file: {LOCKED_FILE}"
+        _assert_rejected_before_import(worktree, monkeypatch)
     finally:
+        _remove_worktree(root, worktree)
+
+
+def test_assume_unchanged_authority_mutation_is_rejected_before_import(tmp_path, monkeypatch):
+    root, worktree = _worktree(tmp_path, "assume-unchanged")
+    flag_set = False
+    try:
+        _set_index_flag(worktree, "assume-unchanged", True)
+        flag_set = True
+        target = worktree / LOCKED_FILE
+        target.write_bytes(target.read_bytes() + b"\n# hidden assume-unchanged mutation\n")
+        diff = subprocess.run(
+            ["git", "-C", str(worktree), "diff", "--quiet", "HEAD", "--", LOCKED_FILE],
+            check=False,
+        )
+        assert diff.returncode == 0
+        _assert_rejected_before_import(worktree, monkeypatch)
+    finally:
+        if flag_set:
+            _set_index_flag(worktree, "assume-unchanged", False)
+        _remove_worktree(root, worktree)
+
+
+def test_skip_worktree_authority_mutation_is_rejected_before_import(tmp_path, monkeypatch):
+    root, worktree = _worktree(tmp_path, "skip-worktree")
+    flag_set = False
+    try:
+        try:
+            _set_index_flag(worktree, "skip-worktree", True)
+        except subprocess.CalledProcessError:
+            pytest.skip("Git environment does not support skip-worktree for this fixture")
+        flag_set = True
+        target = worktree / LOCKED_FILE
+        target.write_bytes(target.read_bytes() + b"\n# hidden skip-worktree mutation\n")
+        _assert_rejected_before_import(worktree, monkeypatch)
+    finally:
+        if flag_set:
+            _set_index_flag(worktree, "skip-worktree", False)
         _remove_worktree(root, worktree)
 
 
@@ -202,6 +283,42 @@ def test_missing_authority_file_is_rejected(tmp_path):
         connection = verify(worktree)
         assert not connection.ok
         assert connection.reason == f"Required authority working-tree file missing: {LOCKED_FILE}"
+    finally:
+        _remove_worktree(root, worktree)
+
+
+def test_authority_path_replaced_by_directory_is_rejected(tmp_path):
+    root, worktree = _worktree(tmp_path, "authority-directory")
+    try:
+        target = worktree / LOCKED_FILE
+        target.unlink()
+        target.mkdir()
+        connection = verify(worktree)
+        assert not connection.ok
+        assert connection.reason == f"Required authority working-tree file missing: {LOCKED_FILE}"
+    finally:
+        _remove_worktree(root, worktree)
+
+
+def test_unavailable_committed_blob_is_rejected_before_import(tmp_path, monkeypatch):
+    root, worktree = _worktree(tmp_path, "missing-blob")
+    imported = False
+
+    def no_blob(root_path, oid):
+        return None
+
+    def fail_if_imported(*args, **kwargs):
+        nonlocal imported
+        imported = True
+        raise AssertionError("Runtime import must not be attempted")
+
+    try:
+        monkeypatch.setattr(adapter, "_committed_blob_bytes", no_blob)
+        monkeypatch.setattr(adapter.importlib.util, "spec_from_file_location", fail_if_imported)
+        connection = verify(worktree)
+        assert not connection.ok
+        assert connection.reason.startswith("Authority working-tree bytes differ from committed blob:")
+        assert imported is False
     finally:
         _remove_worktree(root, worktree)
 
