@@ -1,0 +1,48 @@
+name: validate
+on: [push, pull_request]
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: rezahh107/EV4-Architect-Repo
+          ref: 338228cec0aeae951581690c3faba68f512e615c
+          path: EV4-Architect-Repo
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --locked
+      - name: Verify locked authority checkout
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "src"
+          $env:EV4_ARCHITECT_REPO = Join-Path $env:GITHUB_WORKSPACE "EV4-Architect-Repo"
+          git -C $env:EV4_ARCHITECT_REPO rev-parse HEAD
+          git -C $env:EV4_ARCHITECT_REPO status --porcelain
+          @'
+          import os
+          from pathlib import Path
+
+          from ev4_architect_stage_qc.architect_adapter import verify
+
+          authority_root = Path(os.environ["EV4_ARCHITECT_REPO"])
+          connection = verify(authority_root)
+          print("authority_path:", authority_root)
+          print("path_exists:", authority_root.exists())
+          print("git_dir_exists:", (authority_root / ".git").exists())
+          print("connection_ok:", connection.ok)
+          print("connection_reason:", connection.reason)
+          raise SystemExit(0 if connection.ok else 1)
+          '@ | uv run python -
+      - name: Run tests
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "src"
+          $env:EV4_ARCHITECT_REPO = Join-Path $env:GITHUB_WORKSPACE "EV4-Architect-Repo"
+          uv run pytest -vv --tb=long
+      - name: Compile Python
+        if: always()
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "src"
+          uv run python -m compileall -q src
