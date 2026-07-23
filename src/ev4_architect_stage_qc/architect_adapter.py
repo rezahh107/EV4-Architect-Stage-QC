@@ -60,17 +60,19 @@ def _authority_attributes(root, rel):
     return dict(zip(fields[1::3], fields[2::3], strict=True))
 
 
-def _working_tree_matches_commit(root, rel):
-    try:
-        return subprocess.run(
-            ["git", "-C", str(root), "diff", "--quiet", "--no-ext-diff", "HEAD", "--", rel],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-        ).returncode == 0
-    except Exception:
+def _committed_blob_bytes(root: Path, oid: str) -> bytes | None:
+    return _git_bytes(root, "cat-file", "blob", oid)
+
+
+def _working_tree_matches_blob(root: Path, rel: str, committed_oid: str) -> bool:
+    committed = _committed_blob_bytes(root, committed_oid)
+    if committed is None:
         return False
+    try:
+        working = (root / rel).read_bytes()
+    except OSError:
+        return False
+    return working == committed
 
 
 def _identity(root):
@@ -207,11 +209,11 @@ def verify(root: Path, lock_path: Path | None = None):
                 ref,
                 repository_identity,
             )
-        if not _working_tree_matches_commit(root, rel):
+        if not _working_tree_matches_blob(root, rel, committed_oid):
             return _failed(
                 root,
                 commit,
-                f"Changed authority file: {rel}",
+                f"Authority working-tree bytes differ from committed blob: {rel}",
                 identities,
                 lock,
                 ref,
