@@ -11,7 +11,7 @@ import ev4_architect_stage_qc.core as core
 from ev4_architect_stage_qc.architect_adapter import verify
 from ev4_architect_stage_qc.core import run_final_validation, run_prefinal_validation
 
-EXPECTED_ARCHITECT_HEAD = "90503f18597a72d3764d4cb8fcc2c68b2531c85a"
+EXPECTED_ARCHITECT_HEAD = "0e6f846357eba7605b47a6e7130c45cb57eeb4e9"
 EXPECTED_INTERFACE = "ev4-architect-quality-runtime@2.0.0"
 
 
