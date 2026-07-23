@@ -12,5 +12,5 @@ jobs:
           path: EV4-Architect-Repo
       - uses: astral-sh/setup-uv@v5
       - run: uv sync --locked
-      - run: $env:PYTHONPATH='src'; uv run pytest -q
+      - run: $env:PYTHONPATH='src'; $env:EV4_ARCHITECT_REPO=(Join-Path $env:GITHUB_WORKSPACE 'EV4-Architect-Repo'); uv run pytest -q
       - run: $env:PYTHONPATH='src'; uv run python -m compileall -q src

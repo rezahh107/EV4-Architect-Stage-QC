@@ -1,6 +1,6 @@
 """Strict JSON, distinct digest modes, and atomic writes."""
 from __future__ import annotations
-import hashlib, json, os, tempfile
+import hashlib, json, math, os, tempfile
 from pathlib import Path
 class JsonInputError(ValueError): pass
 def _pairs(pairs):
@@ -10,11 +10,15 @@ def _pairs(pairs):
   d[k]=v
  return d
 def _constant(token): raise JsonInputError(f"non-finite JSON number: {token}")
+def _float(token):
+ value=float(token)
+ if not math.isfinite(value): raise JsonInputError(f"non-finite JSON number: {token}")
+ return value
 def load_strict(path: Path):
  try: raw=path.read_bytes()
  except OSError as e: raise JsonInputError(f"cannot read {path}: {e}") from e
  if raw.startswith(b'\xef\xbb\xbf'): raise JsonInputError("UTF-8 BOM is not permitted")
- try: value=json.loads(raw.decode('utf-8'), object_pairs_hook=_pairs, parse_constant=_constant)
+ try: value=json.loads(raw.decode('utf-8'), object_pairs_hook=_pairs, parse_constant=_constant, parse_float=_float)
  except (UnicodeDecodeError,json.JSONDecodeError,JsonInputError) as e: raise JsonInputError(str(e)) from e
  if not isinstance(value,dict): raise JsonInputError("top-level Stage Output must be an object")
  return value

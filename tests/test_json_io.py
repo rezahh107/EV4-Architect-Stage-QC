@@ -13,3 +13,7 @@ def test_rejects_ambiguous_json(tmp_path,text):
  with pytest.raises(JsonInputError):load_strict(p)
 def test_atomic_canonical_write(tmp_path):
  p=tmp_path/'out.json';write_json(p,{'z':'é','a':1});assert p.read_bytes()==b'{"a":1,"z":"\xc3\xa9"}'
+@pytest.mark.parametrize('text',["{\"value\":1e999999}","{\"value\":-1e999999}","{\"nested\":{\"value\":1e999999}}",'{"items":[1e999999]}'])
+def test_rejects_overflowed_json_floats(tmp_path,text):
+ p=tmp_path/'overflow.json';p.write_text(text,encoding='utf-8')
+ with pytest.raises(JsonInputError,match='non-finite JSON number'):load_strict(p)
