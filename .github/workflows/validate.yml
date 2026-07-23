@@ -13,7 +13,7 @@ jobs:
   windows:
     runs-on: windows-latest
     env:
-      ARCHITECT_HEAD_SHA: 0e6f846357eba7605b47a6e7130c45cb57eeb4e9
+      ARCHITECT_HEAD_SHA: 5eecc46ab0bf8a48a94714558706dd3f3e7b2faf
       STAGE_QC_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Checkout exact Stage-QC head
@@ -48,7 +48,7 @@ jobs:
       - name: Install locked dependencies
         run: uv sync --locked
 
-      - name: Verify locked Runtime interface v2
+      - name: Verify locked Runtime interface v2 and executed bytes
         shell: pwsh
         run: |
           $env:PYTHONPATH = "src"
@@ -65,8 +65,9 @@ jobs:
           print("runtime_interface_id:", connection.runtime_interface_id)
           print("authority_files:", len(connection.identities))
           assert connection.ok, connection.reason
-          assert connection.commit == "0e6f846357eba7605b47a6e7130c45cb57eeb4e9"
+          assert connection.commit == "5eecc46ab0bf8a48a94714558706dd3f3e7b2faf"
           assert connection.runtime_interface_id == "ev4-architect-quality-runtime@2.0.0"
+          assert len(connection.identities) == 18
           assert not hasattr(connection, "trusted_context")
           '@ | uv run python -
 
