@@ -73,7 +73,9 @@ def run_final_validation(stage_folder:Path, terminal_path:Path, architect_root:P
   expected=manifest['project_execution_stages'][-1]
   if terminal.get('run_id')!=outputs[0]['run_id']:raise ValueError('terminal run_id does not match prefinal run')
   if terminal.get('stage_id')!=expected['stage_id'] or terminal.get('stage_version')!=expected['stage_version']:raise ValueError('terminal Stage identity/version does not match manifest')
-  run=conn.runtime.evaluate_run([*outputs,terminal],root=conn.path,require_terminal=True)
+
+  if conn.trusted_context is None:return _record(attempt,'ARCHITECT_CONNECTION_INVALID','Verified Architect connection has no trusted producer provenance.','Verify the Architect connection and retry.')
+  run=conn.runtime.evaluate_run([*outputs,terminal],root=conn.path,require_terminal=True,trusted_context=conn.trusted_context)
   if run['status']!='valid':return _record(attempt,'FINAL_EVALUATION_FAILED','; '.join(run['errors']),'Repair the terminal Stage Output or upstream evidence and run again.')
   write_json(attempt/'generated-artifacts'/'architect-final-run-state.json',run['run_state']); write_json(attempt/'generated-artifacts'/'architect-final-stage-results.json',run['results'])
   return _record(attempt,'FINAL_VALID','Official terminal evaluation and export validation passed.','Open the final result folder.',True,('architect-final-run-state.json','architect-final-stage-results.json'))

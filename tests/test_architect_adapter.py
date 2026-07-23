@@ -15,3 +15,6 @@ def test_wrong_checkout_blocks(tmp_path):
 def test_bundled_lock_is_cwd_independent(tmp_path, monkeypatch):
  monkeypatch.chdir(tmp_path)
  assert LOCK_PATH.is_file()
+def test_locked_checkout_has_deterministic_provenance():
+ c=verify(authority_root())
+ assert c.ok and c.trusted_context == {'producer_provenance': {'repository':'rezahh107/EV4-Architect-Repo','ref':'locked-exact-commit','commit_sha':'338228cec0aeae951581690c3faba68f512e615c'}}

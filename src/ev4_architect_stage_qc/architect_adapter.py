@@ -8,7 +8,7 @@ from .json_io import raw_sha256
 LOCK_PATH = Path(__file__).resolve().parents[2] / 'architect-authority.lock.json'
 @dataclass(frozen=True)
 class Connection:
- ok: bool; path: Path; commit: str|None; reason: str; identities: dict[str,str]; runtime: object|None=None
+ ok: bool; path: Path; commit: str|None; reason: str; identities: dict[str,str]; runtime: object|None=None; trusted_context: dict|None=None
 def sibling_checkout():
  p=Path.cwd().parent/'EV4-Architect-Repo'; return p if p.is_dir() else None
 def _git(root, *args):
@@ -38,4 +38,5 @@ def verify(root: Path, lock_path: Path|None=None):
  except Exception as exc:return Connection(False,root,commit,f'Official authority compatibility failed: {type(exc).__name__}: {exc}',identities)
  if not callable(getattr(module,'evaluate_run',None)) or not callable(getattr(module,'evaluate_stage',None)):
   return Connection(False,root,commit,'Official evaluator entry points are missing.',identities)
- return Connection(True,root,commit,'Compatible Architect runtime.',identities,module)
+ trusted_context={'producer_provenance': {'repository': lock['repository'], 'ref': 'locked-exact-commit', 'commit_sha': commit}}
+ return Connection(True,root,commit,'Compatible Architect runtime.',identities,module,trusted_context)
