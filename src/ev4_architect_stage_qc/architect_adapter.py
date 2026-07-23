@@ -44,6 +44,29 @@ def _git_bytes(root, *args):
         return None
 
 
+def _authority_attributes(root, rel):
+    values = _git_bytes(root, "check-attr", "-z", "filter", "working-tree-encoding", "ident", "--", rel)
+    if values is None:
+        return None
+    fields = values.decode("utf-8", "surrogateescape").split("\0")
+    if fields[-1] != "" or len(fields) != 10:
+        return None
+    return dict(zip(fields[1::3], fields[2::3], strict=True))
+
+
+def _working_tree_matches_commit(root, rel):
+    try:
+        return subprocess.run(
+            ["git", "-C", str(root), "diff", "--quiet", "--no-ext-diff", "HEAD", "--", rel],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        ).returncode == 0
+    except Exception:
+        return False
+
+
 def _identity(root):
     remote = _git_text(root, "config", "--get", "remote.origin.url") or ""
     normalized = remote.removesuffix(".git").removesuffix("/").replace("git@github.com:", "https://github.com/").casefold()
@@ -76,6 +99,12 @@ def verify(root: Path, lock_path: Path | None = None):
         path = root / rel
         if not path.is_file():
             return _failed(root, commit, f"Required authority working-tree file missing: {rel}", identities, lock, ref)
+        attributes = _authority_attributes(root, rel)
+        if attributes is None:
+            return _failed(root, commit, f"Authority Git attributes cannot be verified: {rel}", identities, lock, ref)
+        for attribute, value in attributes.items():
+            if value not in {"unspecified", "unset"}:
+                return _failed(root, commit, f"Unsafe authority Git attribute: {rel}: {attribute}={value}", identities, lock, ref)
         committed_oid = _git_text(root, "rev-parse", f"{commit}:{rel}")
         if not committed_oid:
             return _failed(root, commit, f"Required authority file missing from current commit: {rel}", identities, lock, ref)
@@ -86,7 +115,7 @@ def verify(root: Path, lock_path: Path | None = None):
         identities[rel] = got
         if got != want:
             return _failed(root, commit, f"Authority lock mismatch for committed blob: {rel}", identities, lock, ref)
-        if path.read_bytes() != blob:
+        if not _working_tree_matches_commit(root, rel):
             return _failed(root, commit, f"Changed authority file: {rel}", identities, lock, ref)
     spec = importlib.util.spec_from_file_location("ev4_official_runtime", root / "scripts/architect_quality_runtime.py")
     if not spec or not spec.loader:

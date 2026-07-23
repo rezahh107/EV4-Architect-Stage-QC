@@ -103,6 +103,25 @@ def test_dirty_unrelated_file_is_compatible(tmp_path):
         _remove_worktree(root, worktree)
 
 
+def test_clean_crlf_authority_checkout_is_compatible(tmp_path):
+    root, worktree = _worktree(tmp_path, "clean-crlf")
+    original = subprocess.run(["git", "-C", str(worktree), "config", "--get", "core.autocrlf"], text=True, capture_output=True)
+    try:
+        subprocess.run(["git", "-C", str(worktree), "config", "core.autocrlf", "true"], check=True)
+        target = worktree / LOCKED_FILE
+        target.unlink()
+        subprocess.run(["git", "-C", str(worktree), "checkout", "--", LOCKED_FILE], check=True)
+        assert b"\r\n" in target.read_bytes()
+        connection = verify(worktree)
+        assert connection.ok, connection.reason
+    finally:
+        if original.returncode == 0:
+            subprocess.run(["git", "-C", str(worktree), "config", "core.autocrlf", original.stdout.strip()], check=True)
+        else:
+            subprocess.run(["git", "-C", str(worktree), "config", "--unset-all", "core.autocrlf"], check=False)
+        _remove_worktree(root, worktree)
+
+
 def test_committed_authority_change_is_rejected(tmp_path):
     root, worktree = _worktree(tmp_path, "committed-authority")
     try:
@@ -113,6 +132,18 @@ def test_committed_authority_change_is_rejected(tmp_path):
         connection = verify(worktree)
         assert not connection.ok
         assert connection.reason == f"Authority lock mismatch for committed blob: {LOCKED_FILE}"
+    finally:
+        _remove_worktree(root, worktree)
+
+
+@pytest.mark.parametrize("attribute", ["filter=unsafe", "working-tree-encoding=UTF-16", "ident"])
+def test_unsafe_authority_git_attribute_is_rejected(tmp_path, attribute):
+    root, worktree = _worktree(tmp_path, "unsafe-attribute")
+    try:
+        (worktree / ".gitattributes").write_text(f"{LOCKED_FILE} {attribute}\n", encoding="utf-8")
+        connection = verify(worktree)
+        assert not connection.ok
+        assert connection.reason.startswith(f"Unsafe authority Git attribute: {LOCKED_FILE}:")
     finally:
         _remove_worktree(root, worktree)
 
