@@ -74,7 +74,7 @@ def publish(payload: dict, run_id: str, architect_root: Path, attempt: Path, pub
     if not source.ok:
         return PublisherResult(False, False, False, source.reason)
     location: PublicationLocation | None = None
-    published = False
+    published = False; receipt = None
     try:
         location = create_unique_publisher_worktree(source.path, publication_root)
         publisher = verify(location.publisher_worktree)
@@ -105,6 +105,7 @@ def publish(payload: dict, run_id: str, architect_root: Path, attempt: Path, pub
         if not all(receipt.get(key) is True for key in required) or receipt.get("acceptance_blockers"):
             raise RuntimeError("Official receipt did not establish publication acceptance.")
         published = True
+        location = PublicationLocation(location.publisher_worktree, location.publisher_branch, location.commit, output_path)
         generated = attempt / "generated-artifacts"
         atomic_write(generated / "validated-architect-stage-payload.json", canonical_bytes(payload))
         shutil.copyfile(output_path, generated / "architect-project-gate.json")
@@ -114,8 +115,7 @@ def publish(payload: dict, run_id: str, architect_root: Path, attempt: Path, pub
             write_json(generated / "architect-project-gate-receipt-update.json", update)
         if (generated / "architect-project-gate.json").read_bytes() != output_path.read_bytes():
             raise RuntimeError("Attempt artifact copy does not match official artifact bytes.")
-        location = PublicationLocation(location.publisher_worktree, location.publisher_branch, location.commit, output_path)
         return PublisherResult(True, True, False, "Official Project Gate publication completed.", location, receipt, tuple(p.name for p in generated.iterdir()))
     except Exception as exc:
         # A worktree containing an official artifact is evidence and must outlive the attempt.
-        return PublisherResult(False, published, published, str(exc), location)
+        return PublisherResult(False, published, published, str(exc), location, receipt)

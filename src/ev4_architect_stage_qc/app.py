@@ -7,6 +7,7 @@ from .architect_adapter import sibling_checkout,verify
 from .core import run_final_publication,run_prefinal_validation
 from .settings import load_settings,save_architect_path
 from .theme import apply
+from .result_projection import project_result
 class Application:
  def __init__(self,root):
   self.root=root; self.q=queue.Queue(); self.active=False; self.last_attempt=None; self.architect=tk.StringVar(); self.folder=tk.StringVar(); self.terminal=tk.StringVar(); self.status=tk.StringVar(value='○ Ready'); self.detail=tk.StringVar(value='Select an Architect repository and Stage Output folder.')
@@ -54,7 +55,7 @@ class Application:
  def final_validation(self): self._start(run_final_publication,(Path(self.folder.get()),Path(self.terminal.get()),Path(self.architect.get())),'ℹ FINAL_VALIDATING')
  def _poll(self):
   try:
-   r=self.q.get_nowait();self.active=False;self.pref.configure(state='normal');self.final.configure(state='normal');self.last_attempt=r.attempt_path;self.open_button.configure(state='normal' if r.attempt_path else 'disabled');self.status.set('✓ Final validation and official publication completed\nStatus: FINAL_PUBLISHED' if r.code=='FINAL_PUBLISHED' else ('✓ Final validation passed\n✕ Official Project Gate publication failed' if r.code=='FINAL_PUBLICATION_FAILED' else ('✓ Validation completed successfully' if r.success else '✕ Validation failed')));self.detail.set(f'{r.code}: {r.reason}\nNext action: {r.next_action}')
+   r=self.q.get_nowait();self.active=False;self.pref.configure(state='normal');self.final.configure(state='normal');self.last_attempt=r.attempt_path;title,open_result=project_result(r);self.open_button.configure(state='normal' if open_result and r.attempt_path else 'disabled');self.status.set(title);self.detail.set(f'{r.code}: {r.reason}\nNext action: {r.next_action}')
   except queue.Empty:pass
   self.root.after(100,self._poll)
  def open_result(self):

@@ -105,6 +105,8 @@ def run_final_publication(stage_folder:Path, terminal_path:Path, architect_root:
   capability=check_wsl()
   if not capability.ready:return _record(attempt,'FINAL_VALID_PUBLICATION_UNAVAILABLE',f'{capability.code}: {capability.reason}','Final validation passed. Configure WSL Publisher capability, then publish from a new Attempt.',True,('architect-final-run-state.json','architect-final-stage-results.json'))
   result=publish(payload,terminal['run_id'],sealed.snapshot,attempt,publication_root)
+  if result.published and result.location:
+   write_json(generated/'architect-publication-summary.json',{'status':'FINAL_PUBLISHED_COPY_WARNING' if not result.success else 'FINAL_PUBLISHED','run_id':terminal['run_id'],'architect_repository':'rezahh107/EV4-Architect-Repo','architect_commit_sha':conn.commit,'publisher_branch':result.location.publisher_branch,'publisher_worktree':str(result.location.publisher_worktree),'official_artifact_path':str(result.location.artifact_path),'historical_receipt':result.receipt,'authority_compatibility_mode':conn.compatibility_mode,'authority_files_verified':True})
   if not result.success:
    code='FINAL_PUBLISHED_COPY_WARNING' if result.published else 'FINAL_PUBLICATION_PRECOMMIT_FAILED'
    action='Official artifact was published; open the persistent Publisher worktree.' if result.published else 'Review publication diagnostics and retry with a new Attempt.'

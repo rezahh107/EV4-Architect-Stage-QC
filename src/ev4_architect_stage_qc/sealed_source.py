@@ -25,6 +25,8 @@ def _git(root: Path, *args: str) -> str:
 
 
 def seal(source: Path, commit: str, evidence: Path) -> SealedSource:
+    if _git(source, "rev-parse", "--is-shallow-repository") == "true":
+        raise RuntimeError("SEALED_SOURCE_SHALLOW_REPOSITORY: fetch complete Architect history before publication.")
     evidence.mkdir(parents=True, exist_ok=True)
     bundle = evidence / "sealed-source.bundle"
     ref = f"refs/ev4-stage-qc-seal/{uuid.uuid4().hex}"
@@ -35,8 +37,6 @@ def seal(source: Path, commit: str, evidence: Path) -> SealedSource:
         _git(source, "update-ref", "-d", ref)
     if result.returncode or not bundle.is_file():
         raise RuntimeError(result.stderr.strip() or "Unable to create sealed Git bundle")
-    if _git(source, "bundle", "verify", str(bundle)) is None:
-        raise RuntimeError("Sealed Git bundle verification failed")
     sha = raw_sha256(bundle)
     (evidence / "sealed-source.sha256").write_text(f"{sha}  {bundle.name}\n", encoding="ascii")
     snapshot = evidence / "validation-snapshot"
@@ -48,5 +48,7 @@ def seal(source: Path, commit: str, evidence: Path) -> SealedSource:
     _git(snapshot, "remote", "set-url", "origin", "https://github.com/rezahh107/EV4-Architect-Repo.git")
     if _git(snapshot, "rev-parse", "HEAD") != commit:
         raise RuntimeError("Validation snapshot HEAD differs from bound Architect commit")
+    if _git(snapshot, "fsck", "--no-dangling") is None:
+        raise RuntimeError("Sealed Git bundle snapshot verification failed")
     write_json(evidence / "validation-snapshot-identity.json", {"bound_architect_commit": commit, "bundle_sha256": sha, "snapshot_head": commit})
     return SealedSource(commit, bundle, sha, snapshot)
