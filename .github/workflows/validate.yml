@@ -13,7 +13,7 @@ jobs:
   windows:
     runs-on: windows-latest
     env:
-      ARCHITECT_HEAD_SHA: 90503f18597a72d3764d4cb8fcc2c68b2531c85a
+      ARCHITECT_HEAD_SHA: 0e6f846357eba7605b47a6e7130c45cb57eeb4e9
       STAGE_QC_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Checkout exact Stage-QC head
@@ -65,7 +65,7 @@ jobs:
           print("runtime_interface_id:", connection.runtime_interface_id)
           print("authority_files:", len(connection.identities))
           assert connection.ok, connection.reason
-          assert connection.commit == "90503f18597a72d3764d4cb8fcc2c68b2531c85a"
+          assert connection.commit == "0e6f846357eba7605b47a6e7130c45cb57eeb4e9"
           assert connection.runtime_interface_id == "ev4-architect-quality-runtime@2.0.0"
           assert not hasattr(connection, "trusted_context")
           '@ | uv run python -
