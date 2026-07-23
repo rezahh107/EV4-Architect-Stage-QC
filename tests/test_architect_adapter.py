@@ -22,3 +22,15 @@ def test_locked_checkout_has_deterministic_provenance():
  c=verify(authority_root())
  assert c.ok, c.reason
  assert c.trusted_context == {'producer_provenance': {'repository':'rezahh107/EV4-Architect-Repo','ref':'locked-exact-commit','commit_sha':'338228cec0aeae951581690c3faba68f512e615c'}}
+def test_modified_locked_file_is_rejected(tmp_path):
+ import subprocess
+ root=authority_root(); worktree=tmp_path/'authority-copy'
+ subprocess.run(['git','-C',str(root),'worktree','add','--detach',str(worktree),'HEAD'],check=True,capture_output=True)
+ try:
+  target=worktree/'contracts/project-gate/producer-gate-export.v1.schema.json'
+  target.write_bytes(target.read_bytes()+b'\n ')
+  c=verify(worktree)
+  assert not c.ok
+  assert 'Changed authority file: contracts/project-gate/producer-gate-export.v1.schema.json' == c.reason
+ finally:
+  subprocess.run(['git','-C',str(root),'worktree','remove','--force',str(worktree)],check=True,capture_output=True)
