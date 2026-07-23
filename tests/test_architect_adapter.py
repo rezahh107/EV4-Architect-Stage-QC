@@ -9,7 +9,7 @@ import pytest
 from ev4_architect_stage_qc.architect_adapter import LOCK_PATH, verify
 
 LOCKED_FILE = "scripts/architect_quality_runtime.py"
-EXPECTED_ARCHITECT_HEAD = "90503f18597a72d3764d4cb8fcc2c68b2531c85a"
+EXPECTED_ARCHITECT_HEAD = "0e6f846357eba7605b47a6e7130c45cb57eeb4e9"
 EXPECTED_INTERFACE = "ev4-architect-quality-runtime@2.0.0"
 EXPECTED_AUTHORITY_FILES = 16
 
