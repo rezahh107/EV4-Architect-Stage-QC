@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import importlib
 import json
 import os
 from pathlib import Path
@@ -11,7 +12,7 @@ import ev4_architect_stage_qc.core as core
 from ev4_architect_stage_qc.architect_adapter import verify
 from ev4_architect_stage_qc.core import run_final_validation, run_prefinal_validation
 
-EXPECTED_ARCHITECT_HEAD = "0e6f846357eba7605b47a6e7130c45cb57eeb4e9"
+EXPECTED_ARCHITECT_HEAD = "5eecc46ab0bf8a48a94714558706dd3f3e7b2faf"
 EXPECTED_INTERFACE = "ev4-architect-quality-runtime@2.0.0"
 
 
@@ -200,6 +201,67 @@ def test_blocked_consequential_stage_has_no_completion_class():
     assert result["stage_status"] == "blocked"
     assert "completion_class" not in result
     assert next_state == state
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda tree: tree["nodes"].append(
+            {"id": "orphan", "role": "normal_flow_group", "children": []}
+        ),
+        lambda tree: tree["nodes"][1]["children"].append("node-wrapper"),
+        lambda tree: tree["nodes"][0]["children"].append("missing-node"),
+        lambda tree: tree["nodes"][2]["children"].append("node-wrapper"),
+        lambda tree: tree["nodes"][2].__setitem__("role", "unclassified-role"),
+    ],
+    ids=["orphan", "cycle", "unknown-child", "multiple-parents", "unclassified-role"],
+)
+def test_malformed_build_tree_blocks_before_terminal_and_preserves_state(mutation):
+    root = authority_root()
+    connection = verify(root)
+    assert connection.ok, connection.reason
+    outputs, _ = architect_outputs(root)
+    context = connection.runtime.RunContext(source_kind="fixture")
+    state = connection.runtime.initial_run_state(outputs[0]["run_id"], root=root)
+    for output in outputs[:7]:
+        result, state = connection.runtime.evaluate_stage(
+            output["stage_id"], output, state, root=root, run_context=context
+        )
+        assert result["stage_status"] == "pass"
+    before = copy.deepcopy(state)
+    invalid = copy.deepcopy(outputs[7])
+    mutation(invalid["canonical_content"])
+
+    result, after = connection.runtime.evaluate_stage(
+        "/build-tree", invalid, state, root=root, run_context=context
+    )
+
+    assert result["stage_status"] == "blocked"
+    assert "completion_class" not in result
+    assert result["next_stage"] is None
+    assert result["decision_state"]["build_tree_digest"] is None
+    assert after == before
+    assert "/build-tree" not in after["completed_stages"]
+    assert "/project-gate-export" not in after["completed_stages"]
+
+
+def test_derivation_schema_drift_is_rejected_by_exact_architect_runtime():
+    root = authority_root()
+    connection = verify(root)
+    assert connection.ok, connection.reason
+    schema = read_json(root / "schemas/ev4-architect-stage-payload.v1.schema.json")
+    schema["$defs"]["payload_identity"]["properties"]["new_required_nested"] = {
+        "type": "string"
+    }
+    schema["$defs"]["payload_identity"]["required"].append("new_required_nested")
+    assembler = importlib.import_module("architect_runtime_payload_assembler")
+    errors = importlib.import_module("architect_runtime_errors")
+    with pytest.raises(errors.PayloadDerivationError) as caught:
+        assembler.validate_derivation_schema(schema)
+    assert [item.code for item in caught.value.diagnostics] == [
+        "PAYLOAD_DERIVATION_REQUIRED_PATH_UNCLASSIFIED"
+    ]
+    assert caught.value.diagnostics[0].path == "payload_identity.new_required_nested"
 
 
 def test_unexpected_runtime_programming_defect_propagates_through_core(tmp_path, monkeypatch):
