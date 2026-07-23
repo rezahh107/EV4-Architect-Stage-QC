@@ -14,7 +14,9 @@ Each run creates a new `results/attempt-####` folder beside the selected Stage f
 
 ## Correctness model
 
-The QC app loads the official evaluator from a local Architect checkout; it does not replace it. Before every run it verifies raw SHA-256 identities in `architect-authority.lock.json`. A changed authority file blocks validation until this application is updated.
+The QC app loads the official evaluator from a local Architect checkout; it does not replace it. It is not tied to one permanent Architect commit: new Architect commits remain compatible when every locked Authority file has the same raw SHA-256 identity recorded in `architect-authority.lock.json`. The observed checkout commit remains in provenance and diagnostics.
+
+Locked Runtime, Manifest, Schema, validator, and Project Gate contract files remain fail-closed: a committed or uncommitted change to any locked Authority file blocks validation until the QC lock is deliberately reviewed and updated. Normal documentation, content, and unrelated repository changes do not require a QC update.
 
 Strict JSON rejects malformed UTF-8, BOMs, duplicate keys, non-finite numbers, and non-object inputs. Raw-file SHA-256 identifies exact input/authority bytes. Canonical JSON SHA-256 identifies semantic JSON using sorted keys, compact separators, UTF-8, and `allow_nan=False`; these modes are intentionally distinct.
 
@@ -22,7 +24,7 @@ Prefinal artifacts are deterministic. Attempt IDs, timestamps, and paths are del
 
 ## Common failures
 
-- **Changed authority file:** update this QC application to a version with a compatible lock.
+- **Changed authority file:** review the Architect authority change, then update this QC application with a deliberately reviewed compatible lock.
 - **Missing/duplicate/wrong version Stage:** correct the selected Stage Output folder.
 - **Official evaluation failure:** follow its affected-stage diagnostic; caller-generated PASS/digest/next-stage fields are not authoritative.
 - **Terminal failure:** correct the model-produced terminal Stage Output or its upstream evidence, then replay.

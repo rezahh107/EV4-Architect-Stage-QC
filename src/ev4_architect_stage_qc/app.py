@@ -35,7 +35,11 @@ class Application:
   if p:self.terminal.set(p)
  def connection(self):
   c=verify(Path(self.architect.get())) if self.architect.get() else None
-  if c and c.ok: save_architect_path(c.path);self.status.set('✓ Compatible Architect runtime');self.detail.set(f'Commit: {c.commit}\nAuthority files: {len(c.identities)} / {len(c.identities)} verified')
+  if c and c.ok:
+   save_architect_path(c.path);self.status.set('✓ Compatible Architect runtime')
+   detail=f'Observed commit: {c.commit}\nCompatibility: Authority files verified\nAuthority files: {len(c.identities)} / {len(c.identities)} verified'
+   if c.commit != c.reference_commit: detail+='\nRepository commit differs from the reference commit; locked Authority files remain compatible.'
+   self.detail.set(detail)
   else:self.status.set('✕ Incompatible Architect runtime');self.detail.set(c.reason if c else 'Select an Architect repository.')
  def _start(self,fn,args):
   if self.active:return

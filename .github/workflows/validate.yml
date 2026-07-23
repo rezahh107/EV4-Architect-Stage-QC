@@ -39,10 +39,43 @@ jobs:
         run: |
           $env:PYTHONPATH = "src"
           $env:EV4_ARCHITECT_REPO = Join-Path $env:GITHUB_WORKSPACE "EV4-Architect-Repo"
-          uv run pytest -vv --tb=long
+          uv run pytest -q
+      - name: Verify authority compatibility across checkout changes
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "src"
+          $env:EV4_ARCHITECT_REPO = Join-Path $env:GITHUB_WORKSPACE "EV4-Architect-Repo"
+          git -C $env:EV4_ARCHITECT_REPO config user.email "qc-ci@example.invalid"
+          git -C $env:EV4_ARCHITECT_REPO config user.name "QC CI"
+          New-Item -ItemType Directory -Force -Path (Join-Path $env:EV4_ARCHITECT_REPO "docs") | Out-Null
+          Set-Content -NoNewline -Path (Join-Path $env:EV4_ARCHITECT_REPO "docs/qc-compatibility-test.txt") -Value "unrelated"
+          git -C $env:EV4_ARCHITECT_REPO add docs/qc-compatibility-test.txt
+          git -C $env:EV4_ARCHITECT_REPO commit -m "test: unrelated compatibility change"
+          @'
+          import os
+          from pathlib import Path
+          from ev4_architect_stage_qc.architect_adapter import verify
+
+          connection = verify(Path(os.environ["EV4_ARCHITECT_REPO"]))
+          assert connection.ok, connection.reason
+          assert connection.commit != connection.reference_commit
+          '@ | uv run python -
+          Add-Content -Path (Join-Path $env:EV4_ARCHITECT_REPO "scripts/architect_quality_runtime.py") -Value "# intentional CI authority mismatch"
+          @'
+          import os
+          from pathlib import Path
+          from ev4_architect_stage_qc.architect_adapter import verify
+
+          connection = verify(Path(os.environ["EV4_ARCHITECT_REPO"]))
+          assert not connection.ok
+          assert "Changed authority file: scripts/architect_quality_runtime.py" == connection.reason
+          '@ | uv run python -
       - name: Compile Python
         if: always()
         shell: pwsh
         run: |
           $env:PYTHONPATH = "src"
           uv run python -m compileall -q src
+      - name: Check patch whitespace
+        shell: pwsh
+        run: git diff --check
