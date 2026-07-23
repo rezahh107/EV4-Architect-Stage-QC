@@ -56,27 +56,53 @@ jobs:
         run: uv sync --locked
 
       - name: Verify locked Runtime interface v2 and executed bytes
+        id: authority_verification
+        continue-on-error: true
         shell: pwsh
         run: |
           $env:PYTHONPATH = "src"
           $env:EV4_ARCHITECT_REPO = Join-Path $env:GITHUB_WORKSPACE "EV4-Architect-Repo"
+          $env:AUTHORITY_DIAGNOSTIC = Join-Path $env:RUNNER_TEMP "stage-qc-authority-verification.json"
           @'
+          import json
           import os
           from pathlib import Path
           from ev4_architect_stage_qc.architect_adapter import verify
 
           connection = verify(Path(os.environ["EV4_ARCHITECT_REPO"]))
-          print("connection_ok:", connection.ok)
-          print("connection_reason:", connection.reason)
-          print("architect_head:", connection.commit)
-          print("runtime_interface_id:", connection.runtime_interface_id)
-          print("authority_files:", len(connection.identities))
+          diagnostic = {
+              "connection_ok": connection.ok,
+              "connection_reason": connection.reason,
+              "architect_head": connection.commit,
+              "reference_commit": connection.reference_commit,
+              "runtime_interface_id": connection.runtime_interface_id,
+              "authority_files_observed": len(connection.identities),
+              "authority_paths_observed": sorted(connection.identities),
+          }
+          Path(os.environ["AUTHORITY_DIAGNOSTIC"]).write_text(
+              json.dumps(diagnostic, indent=2, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(diagnostic, indent=2, sort_keys=True))
           assert connection.ok, connection.reason
           assert connection.commit == "5eecc46ab0bf8a48a94714558706dd3f3e7b2faf"
           assert connection.runtime_interface_id == "ev4-architect-quality-runtime@2.0.0"
           assert len(connection.identities) == 18
           assert not hasattr(connection, "trusted_context")
           '@ | uv run python -
+
+      - name: Upload authority byte-verification diagnostic
+        if: always() && steps.authority_verification.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage-qc-authority-verification-${{ env.STAGE_QC_HEAD_SHA }}
+          path: ${{ runner.temp }}/stage-qc-authority-verification.json
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Enforce authority byte-verification result
+        if: steps.authority_verification.outcome != 'success'
+        run: exit 1
 
       - name: Compile Stage-QC migration
         shell: pwsh
