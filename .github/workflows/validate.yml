@@ -36,6 +36,13 @@ jobs:
           path: EV4-Architect-Repo
           persist-credentials: false
 
+      - name: Materialize exact committed Architect bytes
+        shell: pwsh
+        run: |
+          $architect = Join-Path $env:GITHUB_WORKSPACE "EV4-Architect-Repo"
+          git -C $architect config core.autocrlf false
+          git -C $architect reset --hard $env:ARCHITECT_HEAD_SHA
+
       - name: Assert exact Architect head and clean checkout
         shell: pwsh
         run: |
