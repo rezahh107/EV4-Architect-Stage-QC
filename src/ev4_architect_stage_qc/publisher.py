@@ -92,20 +92,27 @@ def publish(payload: dict, run_id: str, architect_root: Path, attempt: Path, pub
         if os.name == "nt": kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         process = subprocess.run(command, **kwargs)
         diagnostics = attempt / "diagnostics"
-        if process.returncode:
+        receipt = None
+        if process.stdout.strip():
+            receipt = _parse_object(process.stdout, "historical receipt")
+        location = PublicationLocation(location.publisher_worktree, location.publisher_branch, location.commit, output_path)
+        if process.returncode and not (receipt and receipt.get("artifact_committed") is True):
             diagnostics.mkdir(parents=True, exist_ok=True)
             atomic_write(diagnostics / "official-export-stdout.txt", process.stdout.encode())
             atomic_write(diagnostics / "official-export-stderr.txt", process.stderr.encode())
             raise RuntimeError(f"Official exporter failed with exit code {process.returncode}.")
-        receipt = _parse_object(process.stdout, "historical receipt")
         if not output_path.is_file():
             raise RuntimeError("Official exporter exited successfully but did not create the artifact.")
         load_strict(output_path)
         required = ("artifact_committed", "output_committed", "handoff_allowed", "current_revision_accepted", "canonical_destination_present")
-        if not all(receipt.get(key) is True for key in required) or receipt.get("acceptance_blockers"):
-            raise RuntimeError("Official receipt did not establish publication acceptance.")
+        committed = receipt.get("artifact_committed") is True and receipt.get("output_committed") is True
+        if not committed:
+            raise RuntimeError("Official receipt did not establish historical publication.")
         published = True
-        location = PublicationLocation(location.publisher_worktree, location.publisher_branch, location.commit, output_path)
+        if process.returncode == 2 and receipt.get("handoff_allowed") is False:
+            return PublisherResult(False, True, False, "Official artifact was committed but handoff is blocked.", location, receipt)
+        if process.returncode != 0 or not all(receipt.get(key) is True for key in required) or receipt.get("acceptance_blockers"):
+            raise RuntimeError("Official receipt and exporter exit status disagree about publication acceptance.")
         generated = attempt / "generated-artifacts"
         atomic_write(generated / "validated-architect-stage-payload.json", canonical_bytes(payload))
         shutil.copyfile(output_path, generated / "architect-project-gate.json")
