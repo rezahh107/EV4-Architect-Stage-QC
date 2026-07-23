@@ -14,6 +14,12 @@ jobs:
           repository: rezahh107/EV4-Architect-Repo
           ref: 338228cec0aeae951581690c3faba68f512e615c
           path: EV4-Architect-Repo
+      - name: Materialize locked authority bytes
+        shell: pwsh
+        run: |
+          $authority = Join-Path $env:GITHUB_WORKSPACE "EV4-Architect-Repo"
+          git -C $authority -c core.autocrlf=false reset --hard HEAD
+          git -C $authority status --porcelain
       - uses: astral-sh/setup-uv@v5
       - run: uv sync --locked
       - name: Verify locked authority checkout
