@@ -41,6 +41,7 @@ jobs:
         run: |
           $architect = Join-Path $env:GITHUB_WORKSPACE "EV4-Architect-Repo"
           git -C $architect config core.autocrlf false
+          git -C $architect config core.eol lf
           Get-ChildItem -LiteralPath $architect -Force |
             Where-Object { $_.Name -ne ".git" } |
             Remove-Item -Recurse -Force
