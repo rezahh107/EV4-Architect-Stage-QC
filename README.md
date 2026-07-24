@@ -8,7 +8,9 @@ A local, Windows-first Tkinter quality-control application. It is a GUI-only dai
 2. Use **Verify Architect Connection**. A compatible checkout is remembered in `%LOCALAPPDATA%\EV4ArchitectStageQC\settings.json` only after verification.
 3. Select the folder containing the eleven prefinal Stage Output JSON files, then choose **Run Prefinal Validation**.
 4. Open the resulting attempt folder and provide `generated-artifacts/architect-final-stage-context.json` to the model.
-5. The model must produce a **Stage Output**, not a Stage Result or a PASS claim. Select that `/project-gate-export` JSON and run **Final Validation**.
+5. The model must produce a **Stage Output**, not a Stage Result or a PASS claim. Select that `/project-gate-export` JSON.
+6. Click **Validate and Publish Final Output**.
+7. Open the Result Folder and copy `architect-project-gate.json` and `architect-project-gate-receipt.json`.
 
 Each run creates a new `results/attempt-####` folder beside the selected Stage folder. Inputs are copied before evaluation; source files are never changed. Failed attempts retain diagnostics.
 
@@ -20,7 +22,7 @@ Locked Runtime, Manifest, Schema, validator, and Project Gate contract files rem
 
 Strict JSON rejects malformed UTF-8, BOMs, duplicate keys, non-finite numbers, and non-object inputs. Raw-file SHA-256 identifies exact input/authority bytes. Canonical JSON SHA-256 identifies semantic JSON using sorted keys, compact separators, UTF-8, and `allow_nan=False`; these modes are intentionally distinct.
 
-Prefinal artifacts are deterministic. Attempt IDs, timestamps, and paths are deliberately separated into `attempt-metadata.json`. A receipt is input-bound evidence only; Final Validation always replays all original prefinal Stage Outputs through the official evaluator.
+Prefinal artifacts are deterministic. Attempt IDs, timestamps, and paths are deliberately separated into `attempt-metadata.json`. Final validation always replays all original prefinal Stage Outputs through the official evaluator. Publication requires a ready WSL Publisher; the Windows GUI never invokes the POSIX-only exporter with native Windows Python. When WSL is unavailable, final validation remains available and reports that publication is unavailable. A successful publication remains in a persistent app-managed, Named-Branch Publisher worktree. The Attempt folder contains convenience copies of the official artifact and receipt.
 
 ## Common failures
 

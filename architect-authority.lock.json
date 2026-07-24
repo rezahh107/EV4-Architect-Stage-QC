@@ -2,7 +2,8 @@
   "compatibility_mode": "authority_file_identity",
   "entry_points": [
     "scripts/architect_quality_runtime.py#evaluate_stage",
-    "scripts/architect_quality_runtime.py#evaluate_run"
+    "scripts/architect_quality_runtime.py#evaluate_run",
+    "scripts/export-architect-project-gate.py#main"
   ],
   "files": {
     "contracts/project-gate/producer-gate-export.v1.schema.json": "c556bb9deeccdcafeb885a1c8b3dbd660e4e06f452b8ac3c7040d21377465fcc",
@@ -15,9 +16,15 @@
     "scripts/architect_project_gate_exporter/base.py": "392b10a94d0c39f3b9f9c58a46e4b56ed862a042d1e70e583ddba5b4b7a190b0",
     "scripts/architect_project_gate_exporter/contracts.py": "672857297e3b17fd02a44e8221dc5f10cd09661ca5912c612f99473c5d808c00",
     "scripts/architect_quality_runtime.py": "aaf8b5522b90fd8c60cb3bb6537ea244e2defc367de18945d3c98f74f7226335",
-    "scripts/check-architect-stage-payload.py": "40ede2a04f54f7d647785b1253beaf87c6c5240fe28e40c98e27152807212e2d"
+    "scripts/check-architect-stage-payload.py": "40ede2a04f54f7d647785b1253beaf87c6c5240fe28e40c98e27152807212e2d",
+    "scripts/export-architect-project-gate.py": "338056f1bf959063118555a636c84a700d7f5d1442daa10715d4e069f9716de1",
+    "scripts/architect_project_gate_exporter/runner.py": "249b20a8dbb547449c2ddc79d107ff373eb28da78e83ed8503f918ce3d5766d7",
+    "scripts/architect_project_gate_exporter/arch02.py": "c3d5738028c8e47985289899f874d823aa5673a90a84218c453807714352f2b3",
+    "scripts/architect_project_gate_exporter/ancestry.py": "906ca306eef4ddd157193edc755058961fa801c1203d9481fa41d23d0c57a159",
+    "scripts/architect_project_gate_exporter/locking.py": "aa81b2df50c1cc0c3a032e6620d21a77151c3dece1b69ee11827a31deea6e23f",
+    "scripts/architect_project_gate_exporter/transaction.py": "ad76f8023e1e16f164c16bfb5ac3609800c1d5f8c1a4627324f2e57947dab69f"
   },
   "reference_commit_sha": "338228cec0aeae951581690c3faba68f512e615c",
   "repository": "rezahh107/EV4-Architect-Repo",
-  "schema_version": "1.2"
+  "schema_version": "1.3"
 }

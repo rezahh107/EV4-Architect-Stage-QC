@@ -89,7 +89,7 @@ def test_descendant_unrelated_commit_is_compatible(tmp_path):
         connection = verify(worktree)
         assert connection.ok, connection.reason
         assert connection.commit != connection.reference_commit
-        assert len(connection.identities) == 11
+        assert len(connection.identities) == len(json.loads(LOCK_PATH.read_text())['files'])
     finally:
         _remove_worktree(root, worktree)
 

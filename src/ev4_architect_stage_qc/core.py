@@ -5,6 +5,9 @@ from pathlib import Path
 from .architect_adapter import verify
 from .json_io import load_strict,raw_sha256,canonical_sha256,write_json,atomic_write
 from .models import CoreResult
+from .publisher import publish
+from .sealed_source import seal
+from .wsl_capability import check_wsl
 APP_VERSION='0.1.0'
 def _utc(): return datetime.now(timezone.utc).isoformat().replace('+00:00','Z')
 def _attempt(folder:Path):
@@ -80,3 +83,37 @@ def run_final_validation(stage_folder:Path, terminal_path:Path, architect_root:P
   write_json(attempt/'generated-artifacts'/'architect-final-run-state.json',run['run_state']); write_json(attempt/'generated-artifacts'/'architect-final-stage-results.json',run['results'])
   return _record(attempt,'FINAL_VALID','Official terminal evaluation and export validation passed.','Open the final result folder.',True,('architect-final-run-state.json','architect-final-stage-results.json'))
  except Exception as e:return _record(attempt,'FINAL_INPUT_INVALID',str(e),'Correct the input files and run again.')
+
+def run_final_publication(stage_folder:Path, terminal_path:Path, architect_root:Path, publication_root:Path|None=None):
+ """Replay final Runtime validation, then publish its payload with the official exporter."""
+ attempt=_attempt(Path(stage_folder)); conn=verify(architect_root)
+ if not conn.ok:return _record(attempt,'ARCHITECT_CONNECTION_INVALID',conn.reason,'Select a compatible local Architect repository.')
+ try:
+  sealed=seal(conn.path,conn.commit,attempt/'publication-evidence')
+  snapshot_conn=verify(sealed.snapshot)
+  if not snapshot_conn.ok:raise RuntimeError(f'Immutable validation snapshot is incompatible: {snapshot_conn.reason}')
+  manifest,_=snapshot_conn.runtime.load_authority(snapshot_conn.path); entries=_discover(Path(stage_folder),manifest,{Path(terminal_path)}); snap,terminal=_snapshot(attempt,entries,Path(terminal_path)); outputs=[v for _,v in snap]
+  expected=manifest['project_execution_stages'][-1]
+  if terminal.get('run_id')!=outputs[0]['run_id']:raise ValueError('terminal run_id does not match prefinal run')
+  if terminal.get('stage_id')!=expected['stage_id'] or terminal.get('stage_version')!=expected['stage_version']:raise ValueError('terminal Stage identity/version does not match manifest')
+  run=snapshot_conn.runtime.evaluate_run([*outputs,terminal],root=snapshot_conn.path,require_terminal=True,trusted_context=snapshot_conn.trusted_context)
+  if run['status']!='valid':return _record(attempt,'FINAL_VALIDATION_FAILED','; '.join(run['errors']),'Repair the terminal Stage Output or upstream evidence and run again.')
+  generated=attempt/'generated-artifacts'; write_json(generated/'architect-final-run-state.json',run['run_state']); write_json(generated/'architect-final-stage-results.json',run['results'])
+  payload=terminal.get('project_gate_payload')
+  if not isinstance(payload,dict):return _record(attempt,'FINAL_PUBLICATION_FAILED','Validated terminal Stage Output does not contain an object project_gate_payload.','Provide a terminal Stage Output with the validated Project Gate payload.')
+  if payload.get('run_id') not in (None,terminal['run_id']):return _record(attempt,'FINAL_PUBLICATION_FAILED','Project Gate payload run_id does not match the evaluated Run.','Correct the terminal Stage Output.')
+  capability=check_wsl()
+  if not capability.ready:return _record(attempt,'FINAL_VALID_PUBLICATION_UNAVAILABLE',f'{capability.code}: {capability.reason}','Final validation passed. Configure WSL Publisher capability, then publish from a new Attempt.',True,('architect-final-run-state.json','architect-final-stage-results.json'))
+  result=publish(payload,terminal['run_id'],sealed.snapshot,attempt,publication_root)
+  if result.published and result.location:
+   committed_state='FINAL_COMMITTED_HANDOFF_BLOCKED' if result.receipt and result.receipt.get('handoff_allowed') is False else ('FINAL_PUBLISHED_COPY_WARNING' if not result.success else 'FINAL_PUBLISHED')
+   try: write_json(generated/'architect-publication-summary.json',{'status':committed_state,'run_id':terminal['run_id'],'architect_repository':'rezahh107/EV4-Architect-Repo','architect_commit_sha':conn.commit,'publisher_branch':result.location.publisher_branch,'publisher_worktree':str(result.location.publisher_worktree),'official_artifact_path':str(result.location.artifact_path),'historical_receipt':result.receipt,'receipt_update':result.receipt_update,'authority_compatibility_mode':conn.compatibility_mode,'authority_files_verified':True})
+   except Exception: pass
+  if not result.success:
+   code='FINAL_COMMITTED_HANDOFF_BLOCKED' if result.published and result.receipt and result.receipt.get('handoff_allowed') is False else ('FINAL_PUBLISHED_COPY_WARNING' if result.published else 'FINAL_PUBLICATION_PRECOMMIT_FAILED')
+   action='Official artifact was committed; handoff is blocked. Open the persistent Publisher worktree.' if code=='FINAL_COMMITTED_HANDOFF_BLOCKED' else ('Official artifact was published; open the persistent Publisher worktree.' if result.published else 'Review publication diagnostics and retry with a new Attempt.')
+   return _record(attempt,code,result.reason,action,result.published,('architect-final-run-state.json','architect-final-stage-results.json'))
+  summary={'status':'FINAL_PUBLISHED','run_id':terminal['run_id'],'architect_repository':'rezahh107/EV4-Architect-Repo','architect_commit_sha':conn.commit,'publisher_branch':result.location.publisher_branch,'publisher_worktree':str(result.location.publisher_worktree),'official_export_exit_code':0,'official_artifact_path':str(result.location.artifact_path.relative_to(result.location.publisher_worktree)),'result_artifact':'architect-project-gate.json','historical_receipt':'architect-project-gate-receipt.json','authority_compatibility_mode':conn.compatibility_mode,'authority_files_verified':True}
+  write_json(generated/'architect-publication-summary.json',summary)
+  return _record(attempt,'FINAL_PUBLISHED','Official terminal validation and Project Gate publication passed.','Open the result folder.',True,tuple(p.name for p in generated.iterdir()))
+ except Exception as e:return _record(attempt,'FINAL_PUBLICATION_FAILED',str(e),'Review publication diagnostics and retry with a new Attempt.')
