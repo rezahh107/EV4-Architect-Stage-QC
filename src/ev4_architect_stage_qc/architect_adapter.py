@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 LOCK_PATH = Path(__file__).resolve().parents[2] / "architect-authority.lock.json"
+FINALIZATION_ENTRYPOINT = "scripts/architect_quality_runtime.py#finalize_project_gate"
 
 
 @dataclass(frozen=True)
@@ -119,6 +120,7 @@ def verify(root: Path, lock_path: Path | None = None):
             "QC authority compatibility lock is unavailable.",
             identities,
         )
+
     commit = _git_text(root, "rev-parse", "HEAD")
     ref = _git_text(root, "symbolic-ref", "--short", "HEAD") or "verified-authority-files"
     if not commit:
@@ -127,154 +129,132 @@ def verify(root: Path, lock_path: Path | None = None):
         )
     if lock.get("compatibility_mode") != "authority_file_identity":
         return _failed(
-            root,
-            commit,
+            root, commit,
             "QC authority compatibility lock uses an unsupported compatibility mode.",
-            identities,
-            lock,
-            ref,
+            identities, lock, ref,
         )
     if lock.get("identity_algorithm") != "git_blob_oid_sha1":
         return _failed(
-            root,
-            commit,
+            root, commit,
             "QC authority compatibility lock uses an unsupported file identity algorithm.",
-            identities,
-            lock,
-            ref,
+            identities, lock, ref,
         )
+    reference_commit = lock.get("reference_commit_sha")
+    if not isinstance(reference_commit, str) or commit != reference_commit:
+        return _failed(
+            root, commit,
+            "Selected Architect checkout does not match the exact locked commit.",
+            identities, lock, ref,
+        )
+    entry_points = lock.get("entry_points")
+    if not isinstance(entry_points, list) or FINALIZATION_ENTRYPOINT not in entry_points:
+        return _failed(
+            root, commit,
+            "QC authority compatibility lock does not declare the Runtime finalization entry point.",
+            identities, lock, ref,
+        )
+
     repository_identity = _identity(root)
     if repository_identity != lock.get("repository", "").casefold():
         return _failed(
-            root,
-            commit,
+            root, commit,
             "Selected checkout identity is not rezahh107/EV4-Architect-Repo.",
-            identities,
-            lock,
-            ref,
+            identities, lock, ref,
         )
-    for rel, expected_oid in lock.get("files", {}).items():
+
+    files = lock.get("files")
+    if not isinstance(files, dict) or not files:
+        return _failed(
+            root, commit, "QC authority compatibility lock has no file inventory.",
+            identities, lock, ref, repository_identity,
+        )
+    for rel, expected_oid in files.items():
+        if not isinstance(rel, str) or not isinstance(expected_oid, str):
+            return _failed(
+                root, commit, "QC authority compatibility lock file inventory is malformed.",
+                identities, lock, ref, repository_identity,
+            )
         path = root / rel
         if not path.is_file():
             return _failed(
-                root,
-                commit,
-                f"Required authority working-tree file missing: {rel}",
-                identities,
-                lock,
-                ref,
-                repository_identity,
+                root, commit, f"Required authority working-tree file missing: {rel}",
+                identities, lock, ref, repository_identity,
             )
         attributes = _authority_attributes(root, rel)
         if attributes is None:
             return _failed(
-                root,
-                commit,
-                f"Authority Git attributes cannot be verified: {rel}",
-                identities,
-                lock,
-                ref,
-                repository_identity,
+                root, commit, f"Authority Git attributes cannot be verified: {rel}",
+                identities, lock, ref, repository_identity,
             )
         for attribute, value in attributes.items():
             if value not in {"unspecified", "unset"}:
                 return _failed(
-                    root,
-                    commit,
-                    f"Unsafe authority Git attribute: {rel}: {attribute}={value}",
-                    identities,
-                    lock,
-                    ref,
-                    repository_identity,
+                    root, commit, f"Unsafe authority Git attribute: {rel}: {attribute}={value}",
+                    identities, lock, ref, repository_identity,
                 )
         committed_oid = _git_text(root, "rev-parse", f"{commit}:{rel}")
         if not committed_oid:
             return _failed(
-                root,
-                commit,
-                f"Required authority file missing from current commit: {rel}",
-                identities,
-                lock,
-                ref,
-                repository_identity,
+                root, commit, f"Required authority file missing from current commit: {rel}",
+                identities, lock, ref, repository_identity,
             )
         identities[rel] = committed_oid
         if committed_oid != expected_oid:
             return _failed(
-                root,
-                commit,
-                f"Authority lock mismatch for committed blob: {rel}",
-                identities,
-                lock,
-                ref,
-                repository_identity,
+                root, commit, f"Authority lock mismatch for committed blob: {rel}",
+                identities, lock, ref, repository_identity,
             )
         if not _working_tree_matches_blob(root, rel, committed_oid):
             return _failed(
-                root,
-                commit,
-                f"Authority working-tree bytes differ from committed blob: {rel}",
-                identities,
-                lock,
-                ref,
-                repository_identity,
+                root, commit, f"Authority working-tree bytes differ from committed blob: {rel}",
+                identities, lock, ref, repository_identity,
             )
 
     scripts = root / "scripts"
     if str(scripts) not in sys.path:
         sys.path.insert(0, str(scripts))
-    spec = importlib.util.spec_from_file_location(
-        "ev4_official_runtime", scripts / "architect_quality_runtime.py"
-    )
+    wrapper = scripts / "architect_quality_runtime.py"
+    spec = importlib.util.spec_from_file_location("ev4_official_runtime", wrapper)
     if not spec or not spec.loader:
         return _failed(
-            root, commit, "Official evaluator cannot be loaded.", identities, lock, ref
+            root, commit, "Official evaluator cannot be loaded.", identities, lock, ref,
+            repository_identity,
         )
     try:
         module = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = module
         spec.loader.exec_module(module)
-        if (
-            not callable(getattr(module, "evaluate_run", None))
-            or not callable(getattr(module, "evaluate_stage", None))
-            or getattr(module, "RunContext", None) is None
+        required = (
+            "RunContext", "ProjectGateFinalizationResult", "evaluate_run",
+            "evaluate_stage", "finalize_project_gate",
+        )
+        if any(getattr(module, name, None) is None for name in required) or not all(
+            callable(getattr(module, name)) for name in (
+                "evaluate_run", "evaluate_stage", "finalize_project_gate"
+            )
         ):
             return _failed(
-                root,
-                commit,
-                "Official evaluator entry points are missing.",
-                identities,
-                lock,
-                ref,
-                repository_identity,
+                root, commit, "Official Runtime finalization entry points are missing.",
+                identities, lock, ref, repository_identity,
             )
         observed_interface = getattr(module, "RUNTIME_INTERFACE_ID", None)
         if observed_interface != lock.get("runtime_interface_id"):
             return _failed(
-                root,
-                commit,
-                "Official Runtime interface identity mismatch.",
-                identities,
-                lock,
-                ref,
-                repository_identity,
+                root, commit, "Official Runtime interface identity mismatch.",
+                identities, lock, ref, repository_identity,
             )
         module.load_authority(root)
     except Exception as exc:
         return _failed(
-            root,
-            commit,
+            root, commit,
             f"Official authority compatibility failed: {type(exc).__name__}: {exc}",
-            identities,
-            lock,
-            ref,
-            repository_identity,
+            identities, lock, ref, repository_identity,
         )
     return Connection(
         True,
         root,
         commit,
-        "Compatible Architect Runtime interface v2.",
+        "Compatible Architect Runtime finalization interface v2.",
         identities,
         module,
         lock["reference_commit_sha"],
