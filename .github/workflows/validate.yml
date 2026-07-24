@@ -13,7 +13,7 @@ jobs:
   windows:
     runs-on: windows-latest
     env:
-      ARCHITECT_HEAD_SHA: 5eecc46ab0bf8a48a94714558706dd3f3e7b2faf
+      ARCHITECT_HEAD_SHA: 9ac2843f2a90568e741c6bb279654c9ca178500b
       STAGE_QC_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Checkout exact Stage-QC head
@@ -59,7 +59,7 @@ jobs:
       - name: Install locked dependencies
         run: uv sync --locked
 
-      - name: Verify locked Runtime interface v2 and executed bytes
+      - name: Verify locked Runtime finalization interface and executed bytes
         id: authority_verification
         continue-on-error: true
         shell: pwsh
@@ -85,6 +85,9 @@ jobs:
               "runtime_interface_id": connection.runtime_interface_id,
               "authority_files_observed": len(connection.identities),
               "authority_paths_observed": sorted(connection.identities),
+              "finalization_callable": bool(
+                  connection.runtime and callable(getattr(connection.runtime, "finalize_project_gate", None))
+              ),
           }
           if not connection.ok and connection.identities:
               rel, oid = next(reversed(connection.identities.items()))
@@ -104,8 +107,6 @@ jobs:
                   "working_length": len(working),
                   "committed_sha256": hashlib.sha256(committed).hexdigest(),
                   "working_sha256": hashlib.sha256(working).hexdigest(),
-                  "committed_crlf_count": committed.count(b"\r\n"),
-                  "working_crlf_count": working.count(b"\r\n"),
                   "first_difference_index": first_difference,
               }
           Path(os.environ["AUTHORITY_DIAGNOSTIC"]).write_text(
@@ -114,9 +115,10 @@ jobs:
           )
           print(json.dumps(diagnostic, indent=2, sort_keys=True))
           assert connection.ok, connection.reason
-          assert connection.commit == "5eecc46ab0bf8a48a94714558706dd3f3e7b2faf"
+          assert connection.commit == os.environ["ARCHITECT_HEAD_SHA"]
           assert connection.runtime_interface_id == "ev4-architect-quality-runtime@2.0.0"
-          assert len(connection.identities) == 18
+          assert len(connection.identities) == 32
+          assert callable(connection.runtime.finalize_project_gate)
           assert not hasattr(connection, "trusted_context")
           '@ | uv run python -
 
@@ -133,7 +135,7 @@ jobs:
         if: steps.authority_verification.outcome != 'success'
         run: exit 1
 
-      - name: Compile Stage-QC migration
+      - name: Compile Stage-QC finalization migration
         shell: pwsh
         run: |
           $env:PYTHONPATH = "src"
@@ -145,7 +147,7 @@ jobs:
             tests/test_context.py `
             tests/test_core_end_to_end.py
 
-      - name: Run exact cross-repository integration suite
+      - name: Run exact cross-repository finalization suite
         id: integration_tests
         continue-on-error: true
         shell: pwsh
