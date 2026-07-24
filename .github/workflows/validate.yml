@@ -67,12 +67,15 @@ jobs:
           $env:EV4_ARCHITECT_REPO = Join-Path $env:GITHUB_WORKSPACE "EV4-Architect-Repo"
           $env:AUTHORITY_DIAGNOSTIC = Join-Path $env:RUNNER_TEMP "stage-qc-authority-verification.json"
           @'
+          import hashlib
           import json
           import os
+          import subprocess
           from pathlib import Path
           from ev4_architect_stage_qc.architect_adapter import verify
 
-          connection = verify(Path(os.environ["EV4_ARCHITECT_REPO"]))
+          root = Path(os.environ["EV4_ARCHITECT_REPO"])
+          connection = verify(root)
           diagnostic = {
               "connection_ok": connection.ok,
               "connection_reason": connection.reason,
@@ -82,6 +85,28 @@ jobs:
               "authority_files_observed": len(connection.identities),
               "authority_paths_observed": sorted(connection.identities),
           }
+          if not connection.ok and connection.identities:
+              rel, oid = next(reversed(connection.identities.items()))
+              committed = subprocess.check_output(
+                  ["git", "-C", str(root), "cat-file", "blob", oid]
+              )
+              working = (root / rel).read_bytes()
+              limit = min(len(committed), len(working))
+              first_difference = next(
+                  (index for index in range(limit) if committed[index] != working[index]),
+                  limit if len(committed) != len(working) else None,
+              )
+              diagnostic["byte_comparison"] = {
+                  "path": rel,
+                  "oid": oid,
+                  "committed_length": len(committed),
+                  "working_length": len(working),
+                  "committed_sha256": hashlib.sha256(committed).hexdigest(),
+                  "working_sha256": hashlib.sha256(working).hexdigest(),
+                  "committed_crlf_count": committed.count(b"\r\n"),
+                  "working_crlf_count": working.count(b"\r\n"),
+                  "first_difference_index": first_difference,
+              }
           Path(os.environ["AUTHORITY_DIAGNOSTIC"]).write_text(
               json.dumps(diagnostic, indent=2, sort_keys=True) + "\n",
               encoding="utf-8",
