@@ -342,12 +342,17 @@ def test_runtime_contract_failures_are_rejected(tmp_path, replacement, expected)
         runtime_path = worktree / LOCKED_FILE
         source = runtime_path.read_text(encoding="utf-8")
         if replacement == "broken-load-authority":
-            source = re.sub(
-                r"def load_authority[^\n]*:",
-                "def load_authority(root):\n    raise RuntimeError('broken authority')",
-                source,
-                count=1,
+            original = (
+                "def load_authority(\n"
+                "    root: Path = ROOT,\n"
+                ") -> tuple[dict[str, Any], dict[str, Any]]:\n"
             )
+            replacement_source = (
+                "def load_authority(root):\n"
+                "    raise RuntimeError('broken authority')\n"
+            )
+            assert original in source
+            source = source.replace(original, replacement_source, 1)
         elif replacement == "missing-evaluate-run":
             source = source.replace("def evaluate_run", "def evaluate_run_missing", 1)
         elif replacement == "missing-run-context":
