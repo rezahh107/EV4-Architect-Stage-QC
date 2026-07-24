@@ -8,7 +8,7 @@ from .architect_adapter import verify
 from .json_io import atomic_write, canonical_sha256, load_strict, write_json
 from .models import CoreResult
 
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.3.0"
 
 
 def _utc():
@@ -161,13 +161,21 @@ def _context(connection, outputs, run, source_kind: str):
             "project_gate_payload, Runtime Context, producer provenance, official digests, "
             "completion_class, stage_status, next_stage, canonical_payload_valid, "
             "legacy_export_substituted, functional eligibility, or handoff_allowed. "
-            "The Architect Runtime will assemble and validate the canonical terminal Payload."
+            "The Architect Runtime will assemble, validate, finalize, and publish the canonical output."
         ),
         "content_identities": {
             "stage_outputs_canonical_sha256": canonical_sha256(outputs),
             "run_canonical_sha256": canonical_sha256(run),
         },
     }
+
+
+def _copy_verified(source: Path, destination: Path) -> None:
+    source_bytes = source.read_bytes()
+    atomic_write(destination, source_bytes)
+    if destination.read_bytes() != source_bytes:
+        destination.unlink(missing_ok=True)
+        raise ValueError(f"Copied Architect artifact bytes differ: {source.name}")
 
 
 def run_prefinal_validation(
@@ -258,47 +266,58 @@ def run_final_validation(
             or terminal.get("stage_version") != expected["stage_version"]
         ):
             raise ValueError("terminal Stage identity/version does not match manifest")
-        run = connection.runtime.evaluate_run(
+
+        publication_dir = attempt / "architect-publication"
+        finalization = connection.runtime.finalize_project_gate(
             [*outputs, terminal],
-            root=connection.path,
-            require_terminal=True,
             run_context=_run_context(connection, source_kind),
+            repository_root=connection.path,
+            output_directory=publication_dir,
         )
-        if run["status"] != "valid":
+        if not finalization.finalization_succeeded:
+            messages = [
+                str(item.get("message") or item.get("code"))
+                for item in finalization.diagnostics
+                if isinstance(item, dict)
+            ]
             return _record(
                 attempt,
-                "FINAL_EVALUATION_FAILED",
-                "; ".join(run["errors"]),
+                "FINALIZATION_FAILED",
+                "; ".join(messages) or "Architect Runtime finalization failed.",
                 "Repair the terminal Stage Output or upstream evidence and run again.",
             )
-        terminal_result = run["results"][-1]
-        export = terminal_result.get("project_gate_export")
-        if not isinstance(export, dict) or export.get("canonical_payload_valid") is not True:
-            raise ValueError("Runtime did not return a valid terminal Project Gate export")
-        if source_kind == "live_conversation" and export.get("handoff_allowed") is not True:
+        if not finalization.artifact_path or not finalization.receipt_path:
+            raise ValueError("Architect Runtime did not return publication paths")
+
+        generated = attempt / "generated-artifacts"
+        artifact_target = generated / "architect-project-gate.json"
+        receipt_target = generated / "architect-project-gate-receipt.json"
+        _copy_verified(Path(finalization.artifact_path), artifact_target)
+        _copy_verified(Path(finalization.receipt_path), receipt_target)
+        write_json(generated / "architect-final-run-state.json", finalization.run_state)
+        write_json(
+            generated / "architect-final-stage-results.json",
+            list(finalization.stage_results),
+        )
+        artifacts = (
+            "architect-project-gate.json",
+            "architect-project-gate-receipt.json",
+            "architect-final-run-state.json",
+            "architect-final-stage-results.json",
+        )
+        if not finalization.handoff_allowed:
             return _record(
                 attempt,
                 "FINAL_HANDOFF_BLOCKED",
-                "Live Runtime evaluation did not authorize handoff.",
-                "Resolve the Runtime-derived Payload blockers and run again.",
+                f"Architect finalization completed as {finalization.publication_status}; handoff remains blocked.",
+                "Resolve the Runtime-derived blockers before downstream handoff.",
+                False,
+                artifacts,
             )
-        if source_kind != "live_conversation" and (
-            export.get("handoff_allowed") is not False
-            or export.get("functional_eligibility", {}).get("would_allow") is not True
-        ):
-            raise ValueError("Synthetic Runtime handoff semantics are inconsistent")
-        artifacts = {
-            "architect-final-run-state.json": run["run_state"],
-            "architect-final-stage-results.json": run["results"],
-            "architect-runtime-issued-payload.json": export["runtime_issued_payload"],
-            "architect-project-gate-export.json": export,
-        }
-        for name, value in artifacts.items():
-            write_json(attempt / "generated-artifacts" / name, value)
         return _record(
             attempt,
             "FINAL_VALID",
-            "Official terminal evaluation and Runtime-issued export validation passed.",
+            "Architect Runtime finalized and published the official Project Gate artifact and receipt.",
             "Open the final result folder.",
             True,
             artifacts,
