@@ -41,6 +41,9 @@ jobs:
         run: |
           $architect = Join-Path $env:GITHUB_WORKSPACE "EV4-Architect-Repo"
           git -C $architect config core.autocrlf false
+          Get-ChildItem -LiteralPath $architect -Force |
+            Where-Object { $_.Name -ne ".git" } |
+            Remove-Item -Recurse -Force
           git -C $architect reset --hard $env:ARCHITECT_HEAD_SHA
 
       - name: Assert exact Architect head and clean checkout
