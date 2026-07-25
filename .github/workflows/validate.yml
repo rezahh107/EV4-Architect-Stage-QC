@@ -13,7 +13,7 @@ jobs:
   windows:
     runs-on: windows-latest
     env:
-      ARCHITECT_HEAD_SHA: 9ac2843f2a90568e741c6bb279654c9ca178500b
+      ARCHITECT_HEAD_SHA: 7731ed286d3199b9fdae208d8ce48c4f1ecc55cd
       STAGE_QC_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Checkout exact Stage-QC head
