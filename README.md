@@ -12,6 +12,14 @@ A local, Windows-first Tkinter quality-control application. It is a GUI-only dai
 
 Each run creates a new `results/attempt-####` folder beside the selected Stage folder. Inputs are copied before evaluation; source files are never changed. Failed attempts retain diagnostics.
 
+## Fresh-process execution boundary
+
+Every connection verification, prefinal validation, and final validation starts a new Python interpreter, performs exactly one operation, returns a bounded JSON-compatible result, and exits. The Tkinter parent may wait in a background thread, but it never imports or executes the Architect Adapter, Architect Runtime, or Core validation functions.
+
+The parent request contains only the protocol identity, request identity, operation name, selected checkout path, bounded input paths, and `source_kind` where applicable. Payloads, Stage Results, Run State, provenance, eligibility, Runtime objects, callables, artifacts, receipts, and Handoff authority are not accepted through this boundary. Child startup, exit, transport, identity, schema, or operation failures are deterministic and fail closed; a result from a previous operation is never reused.
+
+A successful child reports the exact origins of the official wrapper, `architect_quality_runtime` package, `architect_quality_runtime.history`, and `architect_project_gate_finalization`. Every origin must resolve to its exact expected path inside the verified selected checkout.
+
 ## Correctness model
 
 The QC app loads the official evaluator from a local Architect checkout; it does not replace it. Compatibility is not an exact-commit or ancestry rule. The committed `architect-authority.lock.json` records the reviewed reference commit and the Git blob OID for every authority-bearing file. A selected checkout is accepted only when the repository identity, Runtime interface, every committed authority blob OID, and every actually imported working-tree byte sequence match that Lock. The actual checkout commit and the Lock reference commit remain separately visible in diagnostics and generated context.
@@ -28,6 +36,8 @@ Prefinal artifacts are deterministic. Attempt IDs, timestamps, and paths are del
 
 ## Common failures
 
+- **Fresh child failure:** retry after checking the selected paths; no prior result is reused.
+- **Module-origin mismatch:** select the intended Architect checkout and restore its exact locked files.
 - **Stale Lock:** review the Architect authority change, then regenerate the canonical Lock from the explicitly selected checkout.
 - **Changed authority file:** restore exact committed bytes or deliberately regenerate the Lock after review.
 - **Missing/duplicate/wrong version Stage:** correct the selected Stage Output folder.
