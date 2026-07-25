@@ -49,6 +49,15 @@ def _record(attempt, code, reason, action, success=False, artifacts=()):
     return CoreResult(success, attempt, code, reason, action, tuple(artifacts))
 
 
+def _diagnostic_text(item: dict) -> str:
+    """Preserve Runtime diagnostic identity while retaining its human message."""
+    code = item.get("code")
+    message = item.get("message")
+    if code and message:
+        return f"{code}: {message}"
+    return str(code or message or "Architect Runtime finalization failed.")
+
+
 def _discover(folder, manifest, excluded: set[Path] | None = None):
     excluded = {item.resolve() for item in (excluded or set())}
     files = sorted(
@@ -276,7 +285,7 @@ def run_final_validation(
         )
         if not finalization.finalization_succeeded:
             messages = [
-                str(item.get("message") or item.get("code"))
+                _diagnostic_text(item)
                 for item in finalization.diagnostics
                 if isinstance(item, dict)
             ]
