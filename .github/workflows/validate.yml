@@ -92,7 +92,7 @@ jobs:
             --expected-commit $env:ARCHITECT_HEAD_SHA `
             --check
 
-      - name: Verify authority-file compatibility and executed bytes
+      - name: Verify fresh-process authority closure and module origins
         id: authority_verification
         continue-on-error: true
         shell: pwsh
@@ -105,11 +105,20 @@ jobs:
           import os
           from pathlib import Path
 
-          from ev4_architect_stage_qc.architect_adapter import LOCK_PATH, verify
+          from ev4_architect_stage_qc.process_launcher import verify_connection
 
-          root = Path(os.environ["EV4_ARCHITECT_REPO"])
-          lock = json.loads(LOCK_PATH.read_text(encoding="utf-8"))
-          connection = verify(root)
+          root = Path(os.environ["EV4_ARCHITECT_REPO"]).resolve()
+          lock = json.loads(Path("architect-authority.lock.json").read_text(encoding="utf-8"))
+          connection = verify_connection(root)
+          identity = connection.execution_identity
+          origins = None
+          if identity is not None:
+              origins = {
+                  "wrapper_origin": None if identity.wrapper_origin is None else str(identity.wrapper_origin),
+                  "package_origin": None if identity.package_origin is None else str(identity.package_origin),
+                  "history_origin": None if identity.history_origin is None else str(identity.history_origin),
+                  "finalization_origin": None if identity.finalization_origin is None else str(identity.finalization_origin),
+              }
           diagnostic = {
               "connection_ok": connection.ok,
               "connection_reason": connection.reason,
@@ -117,13 +126,11 @@ jobs:
               "architect_actual_head": connection.commit,
               "architect_reference_head": connection.reference_commit,
               "runtime_interface_id": connection.runtime_interface_id,
-              "authority_file_count": len(lock["files"]),
-              "authority_paths_observed": sorted(connection.identities),
-              "authority_paths_locked": sorted(lock["files"]),
-              "finalization_callable": bool(
-                  connection.runtime
-                  and callable(getattr(connection.runtime, "finalize_project_gate", None))
-              ),
+              "authority_file_count": connection.authority_file_count,
+              "locked_authority_file_count": len(lock["files"]),
+              "parent_pid": os.getpid(),
+              "child_pid": connection.child_pid,
+              "execution_identity": origins,
           }
           Path(os.environ["AUTHORITY_DIAGNOSTIC"]).write_text(
               json.dumps(diagnostic, indent=2, sort_keys=True) + "\n",
@@ -134,9 +141,17 @@ jobs:
           assert connection.commit == os.environ["ARCHITECT_HEAD_SHA"]
           assert connection.reference_commit == lock["reference_commit_sha"]
           assert connection.runtime_interface_id == lock["runtime_interface_id"]
-          assert set(connection.identities) == set(lock["files"])
-          assert callable(connection.runtime.finalize_project_gate)
-          assert not hasattr(connection, "trusted_context")
+          assert connection.authority_file_count == len(lock["files"])
+          assert connection.child_pid != os.getpid()
+          assert identity is not None
+          for origin in (
+              identity.wrapper_origin,
+              identity.package_origin,
+              identity.history_origin,
+              identity.finalization_origin,
+          ):
+              assert origin is not None
+              Path(origin).resolve().relative_to(root)
           '@ | uv run python -
 
       - name: Upload authority verification diagnostic
@@ -152,14 +167,19 @@ jobs:
         if: steps.authority_verification.outcome != 'success'
         run: exit 1
 
-      - name: Compile Stage-QC identity compatibility repair
+      - name: Compile Stage-QC fresh-process repair
         shell: pwsh
         run: |
           $env:PYTHONPATH = "src"
           uv run python -m py_compile `
+            src/ev4_architect_stage_qc/models.py `
+            src/ev4_architect_stage_qc/process_launcher.py `
+            src/ev4_architect_stage_qc/process_child.py `
+            src/ev4_architect_stage_qc/app.py `
             src/ev4_architect_stage_qc/lock_generator.py `
             src/ev4_architect_stage_qc/architect_adapter.py `
             src/ev4_architect_stage_qc/core.py `
+            tests/test_process_isolation.py `
             tests/test_lock_generator.py `
             tests/test_architect_adapter.py `
             tests/test_context.py `
@@ -173,7 +193,7 @@ jobs:
           $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD = "1"
           uv run pytest -p no:cacheprovider -vv tests/test_lock_generator.py
 
-      - name: Run focused cross-repository compatibility suite
+      - name: Run fresh-process and focused cross-repository suite
         id: integration_tests
         continue-on-error: true
         shell: pwsh
@@ -182,6 +202,7 @@ jobs:
           $env:EV4_ARCHITECT_REPO = Join-Path $env:GITHUB_WORKSPACE "EV4-Architect-Repo"
           $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD = "1"
           uv run pytest -p no:cacheprovider -vv `
+            tests/test_process_isolation.py `
             tests/test_lock_generator.py `
             tests/test_architect_adapter.py `
             tests/test_context.py `
