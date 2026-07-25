@@ -18,6 +18,8 @@ The QC app loads the official evaluator from a local Architect checkout; it does
 
 The Lock is generated deterministically from an explicit Architect checkout and its committed Runtime Authority Manifest. The Manifest's complete Python and data authority inventories, plus the Manifest itself, must exactly equal the Lock file set. CI regenerates the canonical Lock in side-effect-free check mode before Runtime import. Documentation-only or other non-authority commits remain compatible when all locked authority blobs and working-tree bytes are unchanged.
 
+PR descriptions may summarize exact-pair evidence, but they are non-authoritative. The committed Lock is the sole executable source of the selected Architect dependency identity and authority inventory.
+
 Locked Runtime, Manifest, Schema, validator, and Project Gate contract files remain fail-closed: a committed or uncommitted change to any locked Authority file blocks validation until the Lock is deliberately regenerated and reviewed. Hidden index flags and line-ending-only changes do not bypass the raw byte comparison.
 
 Strict JSON rejects malformed UTF-8, BOMs, duplicate keys, non-finite numbers, and non-object inputs. Raw-file SHA-256 identifies Stage Output input bytes. Authority identity uses committed Git blob OIDs plus exact working-tree byte equality. Canonical JSON SHA-256 identifies semantic JSON using sorted keys, compact separators, UTF-8, and `allow_nan=False`; these modes are intentionally distinct.
