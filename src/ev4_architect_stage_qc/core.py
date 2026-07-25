@@ -166,11 +166,15 @@ def _context(connection, outputs, run, source_kind: str):
         },
         "instruction": (
             "Generate exactly one /project-gate-export Stage Output request for this Run. "
-            "Preserve the supplied run identity and selected Candidate. Do not generate "
-            "project_gate_payload, Runtime Context, producer provenance, official digests, "
-            "completion_class, stage_status, next_stage, canonical_payload_valid, "
-            "legacy_export_substituted, functional eligibility, or handoff_allowed. "
-            "The Architect Runtime will assemble, validate, finalize, and publish the canonical output."
+            "Use exactly one supported non-authorizing request form: either export_request "
+            "with format producer-gate-export.v1 and an optional non-empty presentation_note, "
+            "or a non-empty top-level presentation_note with no export_request. Preserve the "
+            "supplied run identity and selected Candidate. Do not generate project_gate_payload, "
+            "Runtime Context, producer provenance, official digests, completion_class, stage_status, "
+            "next_stage, canonical_payload_valid, legacy_export_substituted, functional eligibility, "
+            "handoff_allowed, payload, payload_path, stage_results, run_state, provenance, receipt, "
+            "artifact, capability, or runtime_capability. The Architect Runtime will assemble, "
+            "validate, finalize, and publish the canonical output."
         ),
         "content_identities": {
             "stage_outputs_canonical_sha256": canonical_sha256(outputs),
