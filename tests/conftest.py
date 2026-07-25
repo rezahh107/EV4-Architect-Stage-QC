@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -67,6 +68,10 @@ def selected_runtime_interface_owner(request, monkeypatch: pytest.MonkeyPatch):
         (repository_root / "architect-authority.lock.json").read_text(encoding="utf-8")
     )
     interface_id = lock["runtime_interface_id"]
+    assignment = re.compile(
+        rf"^RUNTIME_INTERFACE_ID\s*=\s*['\"]{re.escape(interface_id)}['\"]\s*$",
+        re.MULTILINE,
+    )
     architect_root = Path(selected)
     owners = []
     for relative in sorted(lock["files"]):
@@ -76,7 +81,7 @@ def selected_runtime_interface_owner(request, monkeypatch: pytest.MonkeyPatch):
             source = (architect_root / relative).read_text(encoding="utf-8")
         except OSError:
             continue
-        if interface_id in source:
+        if assignment.search(source):
             owners.append(relative)
     assert owners == ["scripts/architect_quality_runtime_core.py"]
     monkeypatch.setattr(request.module, "INTERFACE_FILE", owners[0])
