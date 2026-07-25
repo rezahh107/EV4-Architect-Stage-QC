@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -25,3 +26,28 @@ def deterministic_git_text_materialization():
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
+
+
+@pytest.fixture(autouse=True)
+def canonical_test_lock_materialization(monkeypatch: pytest.MonkeyPatch):
+    """Write synthetic *.lock.json fixtures as canonical LF bytes on every platform."""
+    original = Path.write_text
+
+    def write_text(
+        path: Path,
+        data: str,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
+    ) -> int:
+        if path.name.endswith(".lock.json") and newline is None:
+            newline = "\n"
+        return original(
+            path,
+            data,
+            encoding=encoding,
+            errors=errors,
+            newline=newline,
+        )
+
+    monkeypatch.setattr(Path, "write_text", write_text)
