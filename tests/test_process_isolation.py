@@ -25,6 +25,20 @@ RUNTIME_MODULES = {
     "_ev4_architect_quality_runtime_internal",
 }
 
+FORBIDDEN_PROCESS_ORIGINS = frozenset(
+    {
+        "os.fork",
+        "os.forkpty",
+        "multiprocessing",
+        "multiprocessing.Process",
+        "multiprocessing.Pool",
+        "multiprocessing.get_context",
+        "multiprocessing.set_start_method",
+        "concurrent.futures.ProcessPoolExecutor",
+        "importlib.reload",
+    }
+)
+
 
 def authority_root() -> Path:
     value = os.environ.get("EV4_ARCHITECT_REPO")
@@ -152,6 +166,101 @@ def _dotted_name(node: ast.AST) -> str:
     return ""
 
 
+def _is_forbidden_origin(origin: str) -> bool:
+    return origin in FORBIDDEN_PROCESS_ORIGINS or origin.startswith("multiprocessing.")
+
+
+def _resolve_origin(node: ast.AST, bindings: dict[str, str]) -> str | None:
+    if isinstance(node, ast.Name):
+        return bindings.get(node.id)
+    if isinstance(node, ast.Attribute):
+        parent = _resolve_origin(node.value, bindings)
+        return f"{parent}.{node.attr}" if parent else None
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "getattr"
+        and len(node.args) == 2
+        and not node.keywords
+        and isinstance(node.args[1], ast.Constant)
+        and isinstance(node.args[1].value, str)
+    ):
+        parent = _resolve_origin(node.args[0], bindings)
+        return f"{parent}.{node.args[1].value}" if parent else None
+    return None
+
+
+def _forbidden_origin_violations(
+    tree: ast.Module,
+) -> list[tuple[str, str, int]]:
+    bindings: dict[str, str] = {}
+    violations: set[tuple[str, str, int]] = set()
+    assignments: list[tuple[str, ast.AST, int]] = []
+
+    def record(origin: str, binding: str, node: ast.AST) -> None:
+        violations.add((origin, binding, getattr(node, "lineno", 0)))
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.asname:
+                    local_name = alias.asname
+                    canonical = alias.name
+                else:
+                    local_name = alias.name.split(".", 1)[0]
+                    canonical = local_name
+                bindings[local_name] = canonical
+                if _is_forbidden_origin(alias.name):
+                    record(alias.name, local_name, node)
+        elif isinstance(node, ast.ImportFrom):
+            module = "." * node.level + (node.module or "")
+            for alias in node.names:
+                if alias.name == "*":
+                    for origin in sorted(FORBIDDEN_PROCESS_ORIGINS):
+                        if origin == module or origin.startswith(f"{module}."):
+                            record(origin, f"{module}.*", node)
+                    continue
+                canonical = f"{module}.{alias.name}" if module else alias.name
+                local_name = alias.asname or alias.name
+                bindings[local_name] = canonical
+                if _is_forbidden_origin(canonical):
+                    record(canonical, local_name, node)
+        elif isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target = node.targets[0]
+            if isinstance(target, ast.Name):
+                assignments.append((target.id, node.value, node.lineno))
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.value is not None
+        ):
+            assignments.append((node.target.id, node.value, node.lineno))
+
+    for _ in range(len(assignments) + 1):
+        changed = False
+        for local_name, value, _ in assignments:
+            origin = _resolve_origin(value, bindings)
+            if origin is not None and bindings.get(local_name) != origin:
+                bindings[local_name] = origin
+                changed = True
+        if not changed:
+            break
+
+    for local_name, _, lineno in assignments:
+        origin = bindings.get(local_name)
+        if origin is not None and _is_forbidden_origin(origin):
+            violations.add((origin, local_name, lineno))
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        origin = _resolve_origin(node.func, bindings)
+        if origin is not None and _is_forbidden_origin(origin):
+            record(origin, _dotted_name(node.func) or origin, node)
+
+    return sorted(violations)
+
+
 def _function(tree: ast.Module, name: str) -> ast.FunctionDef:
     matches = [
         node
@@ -237,6 +346,66 @@ def test_preloaded_parent_runtime_sentinels_are_not_inherited_by_child(
                 sys.modules[name] = previous
 
 
+@pytest.mark.parametrize(
+    ("source", "expected_origins"),
+    [
+        ("from os import fork\nfork()\n", {"os.fork"}),
+        ("from os import fork as clone\nclone()\n", {"os.fork"}),
+        ("import os as platform\nplatform.fork()\n", {"os.fork"}),
+        (
+            "import os as platform\nclone = platform.fork\nclone()\n",
+            {"os.fork"},
+        ),
+        ("from os import *\nfork()\n", {"os.fork", "os.forkpty"}),
+        (
+            'import os as platform\ngetattr(platform, "fork")()\n',
+            {"os.fork"},
+        ),
+        (
+            "import importlib as loader\nloader.reload(module)\n",
+            {"importlib.reload"},
+        ),
+        (
+            "from importlib import reload as refresh\nrefresh(module)\n",
+            {"importlib.reload"},
+        ),
+        (
+            "import concurrent.futures as cf\ncf.ProcessPoolExecutor()\n",
+            {"concurrent.futures.ProcessPoolExecutor"},
+        ),
+        (
+            "from multiprocessing import Process as Worker\nWorker()\n",
+            {"multiprocessing.Process"},
+        ),
+    ],
+)
+def test_binding_aware_guard_rejects_forbidden_origin_aliases(
+    source: str,
+    expected_origins: set[str],
+):
+    violations = _forbidden_origin_violations(ast.parse(source))
+
+    assert violations == sorted(violations)
+    assert expected_origins <= {origin for origin, _, _ in violations}
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import os as platform\nplatform.getpid()\n",
+        "import concurrent.futures as cf\ncf.ThreadPoolExecutor()\n",
+        (
+            "class LocalObject:\n"
+            "    def reload(self):\n"
+            "        return None\n"
+            "LocalObject().reload()\n"
+        ),
+    ],
+)
+def test_binding_aware_guard_accepts_harmless_controls(source: str):
+    assert _forbidden_origin_violations(ast.parse(source)) == []
+
+
 def test_repository_locks_fresh_interpreter_creation_and_child_import_timing():
     repository_root = Path(__file__).resolve().parents[1]
     launcher_tree = ast.parse(
@@ -252,41 +421,12 @@ def test_repository_locks_fresh_interpreter_creation_and_child_import_timing():
         ).read_text(encoding="utf-8")
     )
 
-    imported_names: set[str] = set()
-    for tree in (launcher_tree, child_tree):
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                imported_names.update(alias.name for alias in node.names)
-            elif isinstance(node, ast.ImportFrom):
-                imported_names.add(node.module or "")
-                imported_names.update(alias.name for alias in node.names)
-
-    assert not any(
-        name == "multiprocessing" or name.startswith("multiprocessing.")
-        for name in imported_names
-    )
-    assert "ProcessPoolExecutor" not in imported_names
-
-    forbidden_calls = {
-        "os.fork",
-        "os.forkpty",
-        "multiprocessing.Process",
-        "multiprocessing.Pool",
-        "multiprocessing.get_context",
-        "multiprocessing.set_start_method",
-        "Process",
-        "Pool",
-        "ProcessPoolExecutor",
-        "importlib.reload",
-        "reload",
-    }
-    observed_calls = {
-        _dotted_name(node.func)
-        for tree in (launcher_tree, child_tree)
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-    }
-    assert forbidden_calls.isdisjoint(observed_calls)
+    for relative, tree in (
+        ("src/ev4_architect_stage_qc/process_launcher.py", launcher_tree),
+        ("src/ev4_architect_stage_qc/process_child.py", child_tree),
+    ):
+        violations = _forbidden_origin_violations(tree)
+        assert not violations, f"{relative}: forbidden origins: {violations}"
 
     for tree in (launcher_tree, child_tree):
         for node in ast.walk(tree):
