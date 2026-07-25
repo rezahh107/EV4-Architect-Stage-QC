@@ -6,7 +6,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -141,6 +141,222 @@ def _remove_worktree(root: Path, destination: Path, branch: str | None = None) -
     _git(root, "worktree", "remove", "--force", str(destination))
     if branch:
         _git(root, "branch", "-D", branch)
+
+
+def _dotted_name(node: ast.AST) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        parent = _dotted_name(node.value)
+        return f"{parent}.{node.attr}" if parent else node.attr
+    return ""
+
+
+def _function(tree: ast.Module, name: str) -> ast.FunctionDef:
+    matches = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == name
+    ]
+    assert len(matches) == 1
+    return matches[0]
+
+
+def test_real_launcher_executes_exactly_one_new_python_interpreter(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    root = authority_root()
+    original_run = launcher.subprocess.run
+    invocations: list[tuple[list[str], dict]] = []
+
+    def recording_run(command, **kwargs):
+        captured = list(command)
+        assert captured.count("--request") == 1
+        assert captured.count("--result") == 1
+        request_path = Path(captured[captured.index("--request") + 1])
+        result_path = Path(captured[captured.index("--result") + 1])
+        assert request_path.is_file()
+        assert not result_path.exists()
+        request = read_json(request_path)
+        assert request["operation"] == "verify_connection"
+        invocations.append((captured, dict(kwargs)))
+        return original_run(command, **kwargs)
+
+    monkeypatch.setattr(launcher.subprocess, "run", recording_run)
+    result = verify_connection(root)
+
+    assert result.ok, result.reason
+    assert len(invocations) == 1
+    command, kwargs = invocations[0]
+    assert Path(command[0]).resolve() == Path(sys.executable).resolve()
+    assert command[1:3] == ["-m", launcher.CHILD_MODULE]
+    assert kwargs.get("shell", False) is False
+    assert result.child_pid != os.getpid()
+    _assert_origins(result, root)
+
+
+def test_preloaded_parent_runtime_sentinels_are_not_inherited_by_child(
+    tmp_path: Path,
+):
+    root = authority_root()
+    absent = object()
+    saved = {name: sys.modules.get(name, absent) for name in RUNTIME_MODULES}
+    fake_root = tmp_path / "parent-runtime-sentinels"
+    fake_root.mkdir()
+    sentinels: dict[str, ModuleType] = {}
+
+    try:
+        for name in sorted(RUNTIME_MODULES):
+            module = ModuleType(name)
+            module.__file__ = str(fake_root / f"{name.replace('.', '_')}.py")
+            module.__package__ = name.rpartition(".")[0]
+            if name == "architect_quality_runtime":
+                module.__path__ = [str(fake_root / "architect_quality_runtime")]
+            sentinels[name] = module
+            sys.modules[name] = module
+        setattr(
+            sentinels["architect_quality_runtime"],
+            "history",
+            sentinels["architect_quality_runtime.history"],
+        )
+
+        result = verify_connection(root)
+
+        assert result.ok, result.reason
+        assert result.child_pid != os.getpid()
+        _assert_origins(result, root)
+        fake_origins = {Path(module.__file__).resolve() for module in sentinels.values()}
+        assert fake_origins.isdisjoint(set(_origin_paths(result)))
+        for name, module in sentinels.items():
+            assert sys.modules.get(name) is module
+    finally:
+        for name, previous in saved.items():
+            if previous is absent:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = previous
+
+
+def test_repository_locks_fresh_interpreter_creation_and_child_import_timing():
+    repository_root = Path(__file__).resolve().parents[1]
+    launcher_tree = ast.parse(
+        (
+            repository_root
+            / "src/ev4_architect_stage_qc/process_launcher.py"
+        ).read_text(encoding="utf-8")
+    )
+    child_tree = ast.parse(
+        (
+            repository_root
+            / "src/ev4_architect_stage_qc/process_child.py"
+        ).read_text(encoding="utf-8")
+    )
+
+    imported_names: set[str] = set()
+    for tree in (launcher_tree, child_tree):
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported_names.update(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                imported_names.add(node.module or "")
+                imported_names.update(alias.name for alias in node.names)
+
+    assert not any(
+        name == "multiprocessing" or name.startswith("multiprocessing.")
+        for name in imported_names
+    )
+    assert "ProcessPoolExecutor" not in imported_names
+
+    forbidden_calls = {
+        "os.fork",
+        "os.forkpty",
+        "multiprocessing.Process",
+        "multiprocessing.Pool",
+        "multiprocessing.get_context",
+        "multiprocessing.set_start_method",
+        "Process",
+        "Pool",
+        "ProcessPoolExecutor",
+        "importlib.reload",
+        "reload",
+    }
+    observed_calls = {
+        _dotted_name(node.func)
+        for tree in (launcher_tree, child_tree)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+    }
+    assert forbidden_calls.isdisjoint(observed_calls)
+
+    for tree in (launcher_tree, child_tree):
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                if (
+                    _dotted_name(node.func.value) == "sys.modules"
+                    and node.func.attr
+                    in {"clear", "pop", "popitem", "setdefault", "update"}
+                ):
+                    pytest.fail("production must not mutate governed sys.modules state")
+            targets: list[ast.AST] = []
+            if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+                raw_targets = (
+                    node.targets if isinstance(node, ast.Assign) else [node.target]
+                )
+                targets.extend(raw_targets)
+            elif isinstance(node, ast.Delete):
+                targets.extend(node.targets)
+            for target in targets:
+                if (
+                    isinstance(target, ast.Subscript)
+                    and _dotted_name(target.value) == "sys.modules"
+                ) or (
+                    isinstance(target, ast.Attribute)
+                    and _dotted_name(target) == "sys.modules"
+                ):
+                    pytest.fail("production must not replace or delete sys.modules state")
+
+    invoke = _function(launcher_tree, "_invoke")
+    subprocess_runs = [
+        node
+        for node in ast.walk(invoke)
+        if isinstance(node, ast.Call)
+        and _dotted_name(node.func) == "subprocess.run"
+    ]
+    assert len(subprocess_runs) == 1
+    assert not any(isinstance(node, ast.While) for node in ast.walk(invoke))
+
+    main = _function(child_tree, "main")
+    execute_calls = [
+        node
+        for node in ast.walk(main)
+        if isinstance(node, ast.Call) and _dotted_name(node.func) == "_execute"
+    ]
+    assert len(execute_calls) == 1
+    assert not any(isinstance(node, ast.While) for node in ast.walk(main))
+
+    top_level_imports: set[str] = set()
+    for node in child_tree.body:
+        if isinstance(node, ast.Import):
+            top_level_imports.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            top_level_imports.add(node.module or "")
+    assert not any("architect_adapter" in name for name in top_level_imports)
+    assert not any(name.endswith(".core") or name == "core" for name in top_level_imports)
+    assert not any("architect_quality_runtime" in name for name in top_level_imports)
+
+    expected_local_imports = {
+        "_verify": "architect_adapter",
+        "_prefinal": "core",
+        "_final": "core",
+    }
+    for function_name, required_fragment in expected_local_imports.items():
+        function = _function(child_tree, function_name)
+        local_imports = {
+            node.module or ""
+            for node in ast.walk(function)
+            if isinstance(node, ast.ImportFrom)
+        }
+        assert any(required_fragment in name for name in local_imports)
 
 
 def test_parent_has_no_direct_runtime_boundary_and_loads_no_runtime_modules():
