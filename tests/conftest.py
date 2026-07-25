@@ -29,8 +29,8 @@ def deterministic_git_text_materialization():
 
 
 @pytest.fixture(autouse=True)
-def canonical_test_lock_materialization(monkeypatch: pytest.MonkeyPatch):
-    """Write synthetic *.lock.json fixtures as canonical LF bytes on every platform."""
+def canonical_test_text_materialization(monkeypatch: pytest.MonkeyPatch):
+    """Write synthetic Lock and Runtime-owner fixtures as canonical LF bytes."""
     original = Path.write_text
 
     def write_text(
@@ -40,7 +40,10 @@ def canonical_test_lock_materialization(monkeypatch: pytest.MonkeyPatch):
         errors: str | None = None,
         newline: str | None = None,
     ) -> int:
-        if path.name.endswith(".lock.json") and newline is None:
+        if (
+            path.name.endswith(".lock.json")
+            or path.name == "architect_quality_runtime_core.py"
+        ) and newline is None:
             newline = "\n"
         return original(
             path,
