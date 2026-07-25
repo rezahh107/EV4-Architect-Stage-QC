@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -65,3 +66,19 @@ def selected_runtime_interface_owner(request, monkeypatch: pytest.MonkeyPatch):
             "INTERFACE_FILE",
             "scripts/architect_quality_runtime_core.py",
         )
+
+
+@pytest.fixture(autouse=True)
+def isolate_runtime_interface_mutation(request):
+    """Remove modules loaded from the mutated Runtime checkout after its test."""
+    yield
+    if request.node.name != "test_runtime_interface_mismatch_is_rejected_after_identity_checks":
+        return
+    for name in list(sys.modules):
+        if (
+            name == "architect_quality_runtime"
+            or name.startswith("architect_quality_runtime.")
+            or name == "_ev4_architect_quality_runtime_internal"
+            or name == "ev4_official_runtime"
+        ):
+            sys.modules.pop(name, None)
