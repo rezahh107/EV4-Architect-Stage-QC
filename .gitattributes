@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Canonical generated dependency Lock must retain byte-identical UTF-8 LF materialization.
+architect-authority.lock.json text eol=lf
