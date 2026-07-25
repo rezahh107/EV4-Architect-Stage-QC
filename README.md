@@ -14,19 +14,27 @@ Each run creates a new `results/attempt-####` folder beside the selected Stage f
 
 ## Correctness model
 
-The QC app loads the official evaluator from a local Architect checkout; it does not replace it. It is not tied to one permanent Architect commit: new Architect commits remain compatible when every locked Authority file has the same raw SHA-256 identity recorded in `architect-authority.lock.json`. The observed checkout commit remains in provenance and diagnostics.
+The QC app loads the official evaluator from a local Architect checkout; it does not replace it. Compatibility is not an exact-commit or ancestry rule. The committed `architect-authority.lock.json` records the reviewed reference commit and the Git blob OID for every authority-bearing file. A selected checkout is accepted only when the repository identity, Runtime interface, every committed authority blob OID, and every actually imported working-tree byte sequence match that Lock. The actual checkout commit and the Lock reference commit remain separately visible in diagnostics and generated context.
 
-Locked Runtime, Manifest, Schema, validator, and Project Gate contract files remain fail-closed: a committed or uncommitted change to any locked Authority file blocks validation until the QC lock is deliberately reviewed and updated. Normal documentation, content, and unrelated repository changes do not require a QC update.
+The Lock is generated deterministically from an explicit Architect checkout and its committed Runtime Authority Manifest. The Manifest's complete Python and data authority inventories, plus the Manifest itself, must exactly equal the Lock file set. CI regenerates the canonical Lock in side-effect-free check mode before Runtime import. Documentation-only or other non-authority commits remain compatible when all locked authority blobs and working-tree bytes are unchanged.
 
-Strict JSON rejects malformed UTF-8, BOMs, duplicate keys, non-finite numbers, and non-object inputs. Raw-file SHA-256 identifies exact input/authority bytes. Canonical JSON SHA-256 identifies semantic JSON using sorted keys, compact separators, UTF-8, and `allow_nan=False`; these modes are intentionally distinct.
+Locked Runtime, Manifest, Schema, validator, and Project Gate contract files remain fail-closed: a committed or uncommitted change to any locked Authority file blocks validation until the Lock is deliberately regenerated and reviewed. Hidden index flags and line-ending-only changes do not bypass the raw byte comparison.
+
+Strict JSON rejects malformed UTF-8, BOMs, duplicate keys, non-finite numbers, and non-object inputs. Raw-file SHA-256 identifies Stage Output input bytes. Authority identity uses committed Git blob OIDs plus exact working-tree byte equality. Canonical JSON SHA-256 identifies semantic JSON using sorted keys, compact separators, UTF-8, and `allow_nan=False`; these modes are intentionally distinct.
 
 Prefinal artifacts are deterministic. Attempt IDs, timestamps, and paths are deliberately separated into `attempt-metadata.json`. A receipt is input-bound evidence only; Final Validation always replays all original prefinal Stage Outputs through the official evaluator.
 
 ## Common failures
 
-- **Changed authority file:** review the Architect authority change, then update this QC application with a deliberately reviewed compatible lock.
+- **Stale Lock:** review the Architect authority change, then regenerate the canonical Lock from the explicitly selected checkout.
+- **Changed authority file:** restore exact committed bytes or deliberately regenerate the Lock after review.
 - **Missing/duplicate/wrong version Stage:** correct the selected Stage Output folder.
 - **Official evaluation failure:** follow its affected-stage diagnostic; caller-generated PASS/digest/next-stage fields are not authoritative.
 - **Terminal failure:** correct the model-produced terminal Stage Output or its upstream evidence, then replay.
 
-Developer checks use `uv run pytest` and are not required for normal user operation.
+Developer checks use `uv run pytest`. Canonical Lock commands are:
+
+```text
+python -m ev4_architect_stage_qc.lock_generator --architect <path> --lock architect-authority.lock.json --expected-commit <sha> --write
+python -m ev4_architect_stage_qc.lock_generator --architect <path> --lock architect-authority.lock.json --expected-commit <sha> --check
+```

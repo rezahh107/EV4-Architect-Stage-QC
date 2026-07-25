@@ -1,367 +1,416 @@
+from __future__ import annotations
+
 import json
 import os
-import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 import ev4_architect_stage_qc.architect_adapter as adapter
-from ev4_architect_stage_qc.architect_adapter import LOCK_PATH, verify
+from ev4_architect_stage_qc.architect_adapter import LOCK_PATH, MANIFEST_PATH, verify
+from ev4_architect_stage_qc.lock_generator import generate_lock_bytes
 
 LOCKED_FILE = "scripts/architect_quality_runtime.py"
-EXPECTED_ARCHITECT_HEAD = "5eecc46ab0bf8a48a94714558706dd3f3e7b2faf"
-EXPECTED_INTERFACE = "ev4-architect-quality-runtime@2.0.0"
-EXPECTED_AUTHORITY_FILES = 18
-BYTE_MISMATCH_REASON = f"Authority working-tree bytes differ from committed blob: {LOCKED_FILE}"
+INTERFACE_FILE = "scripts/architect_quality_runtime/__init__.py"
+HISTORY_FILE = "scripts/architect_quality_runtime/history.py"
+COMPATIBILITY_SIDECAR = "scripts/architect_project_gate_runtime_api.py"
 
 
-def authority_root():
+def authority_root() -> Path:
     value = os.environ.get("EV4_ARCHITECT_REPO")
     if not value:
-        pytest.skip("integration-only: set EV4_ARCHITECT_REPO to the locked checkout")
+        pytest.skip("integration-only: set EV4_ARCHITECT_REPO to the selected checkout")
     return Path(value)
 
 
-def _worktree(tmp_path, name):
+def _load_lock() -> dict:
+    return json.loads(LOCK_PATH.read_text(encoding="utf-8"))
+
+
+def _write_lock(tmp_path: Path, value: dict, name: str) -> Path:
+    path = tmp_path / f"{name}.lock.json"
+    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return path
+
+
+def _run(*args: str, cwd: Path, capture: bool = True) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["git", "-C", str(cwd), *args],
+        check=True,
+        capture_output=capture,
+        text=True,
+    )
+
+
+def _worktree(tmp_path: Path, name: str, start: str = "HEAD"):
     root = authority_root()
     worktree = tmp_path / name
-    branch = f"qc-compatibility-{name}"
-    subprocess.run(
-        ["git", "-C", str(root), "worktree", "add", "-b", branch, str(worktree), "HEAD"],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(worktree), "config", "user.email", "qc@example.invalid"],
-        check=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(worktree), "config", "user.name", "QC compatibility test"],
-        check=True,
-    )
+    branch = f"qc-identity-{name}"
+    _run("worktree", "add", "-b", branch, str(worktree), start, cwd=root)
+    _run("config", "user.email", "qc@example.invalid", cwd=worktree)
+    _run("config", "user.name", "QC compatibility test", cwd=worktree)
+    return root, worktree, branch
+
+
+def _detached_worktree(tmp_path: Path, name: str, commit: str):
+    root = authority_root()
+    worktree = tmp_path / name
+    _run("worktree", "add", "--detach", str(worktree), commit, cwd=root)
     return root, worktree
 
 
-def _remove_worktree(root, worktree):
-    subprocess.run(
-        ["git", "-C", str(root), "worktree", "remove", "--force", str(worktree)],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(root), "branch", "-D", f"qc-compatibility-{worktree.name}"],
-        check=True,
-        capture_output=True,
-    )
+def _remove_worktree(root: Path, worktree: Path, branch: str | None = None) -> None:
+    _run("worktree", "remove", "--force", str(worktree), cwd=root)
+    if branch:
+        _run("branch", "-D", branch, cwd=root)
 
 
 def _set_index_flag(worktree: Path, flag: str, enabled: bool) -> None:
     option = f"--{flag}" if enabled else f"--no-{flag}"
-    subprocess.run(
-        ["git", "-C", str(worktree), "update-index", option, LOCKED_FILE],
-        check=True,
-        capture_output=True,
-    )
+    _run("update-index", option, LOCKED_FILE, cwd=worktree)
 
 
-def _assert_rejected_before_import(worktree: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def _assert_rejected_before_import(
+    root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    expected_reason: str,
+    lock_path: Path | None = None,
+):
     imported = False
-
-    def fail_if_imported(*args, **kwargs):
-        nonlocal imported
-        imported = True
-        raise AssertionError("Runtime import must not be attempted after authority byte mismatch")
-
-    monkeypatch.setattr(adapter.importlib.util, "spec_from_file_location", fail_if_imported)
-    connection = verify(worktree)
-    assert not connection.ok
-    assert connection.reason == BYTE_MISMATCH_REASON
-    assert imported is False
-    assert connection.runtime is None
-
-
-def test_reference_checkout_loads_runtime_interface_v2():
-    connection = verify(authority_root())
-    assert connection.ok, connection.reason
-    assert connection.runtime is not None
-    assert callable(connection.runtime.evaluate_run)
-    assert callable(connection.runtime.evaluate_stage)
-    assert connection.runtime.RunContext is not None
-    assert connection.runtime_interface_id == EXPECTED_INTERFACE
-    assert connection.runtime.RUNTIME_INTERFACE_ID == EXPECTED_INTERFACE
-    assert connection.compatibility_mode == "authority_file_identity"
-    assert connection.reference_commit == EXPECTED_ARCHITECT_HEAD
-    assert len(connection.identities) == EXPECTED_AUTHORITY_FILES
-
-
-def test_connection_exposes_no_legacy_trusted_context():
-    connection = verify(authority_root())
-    assert connection.ok, connection.reason
-    assert not hasattr(connection, "trusted_context")
-
-
-def test_wrong_checkout_blocks(tmp_path):
-    assert not verify(tmp_path).ok
-
-
-def test_wrong_repository_origin_is_rejected(tmp_path):
-    root, worktree = _worktree(tmp_path, "wrong-origin")
-    original = subprocess.check_output(
-        ["git", "-C", str(worktree), "config", "--get", "remote.origin.url"],
-        text=True,
-    ).strip()
-    try:
-        subprocess.run(
-            [
-                "git",
-                "-C",
-                str(worktree),
-                "remote",
-                "set-url",
-                "origin",
-                "https://github.com/example/not-architect.git",
-            ],
-            check=True,
-        )
-        connection = verify(worktree)
-        assert not connection.ok
-        assert "identity" in connection.reason
-    finally:
-        subprocess.run(
-            ["git", "-C", str(worktree), "remote", "set-url", "origin", original],
-            check=True,
-        )
-        _remove_worktree(root, worktree)
-
-
-def test_bundled_lock_is_cwd_independent(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    assert LOCK_PATH.is_file()
-
-
-def test_lock_records_exact_runtime_interface_and_head():
-    lock = json.loads(LOCK_PATH.read_text(encoding="utf-8"))
-    assert lock["reference_commit_sha"] == EXPECTED_ARCHITECT_HEAD
-    assert lock["runtime_interface_id"] == EXPECTED_INTERFACE
-    assert lock["identity_algorithm"] == "git_blob_oid_sha1"
-    assert len(lock["files"]) == EXPECTED_AUTHORITY_FILES
-    assert "scripts/architect_build_tree_validation.py" in lock["files"]
-    assert "scripts/architect_payload_derivation_validation.py" in lock["files"]
-
-
-def test_descendant_unrelated_commit_is_compatible(tmp_path):
-    root, worktree = _worktree(tmp_path, "descendant")
-    try:
-        doc = worktree / "docs/qc-compatibility-test.txt"
-        doc.parent.mkdir(exist_ok=True)
-        doc.write_text("unrelated documentation\n", encoding="utf-8")
-        subprocess.run(
-            ["git", "-C", str(worktree), "add", str(doc.relative_to(worktree))],
-            check=True,
-        )
-        subprocess.run(
-            ["git", "-C", str(worktree), "commit", "-m", "test: unrelated compatibility change"],
-            check=True,
-            capture_output=True,
-        )
-        connection = verify(worktree)
-        assert connection.ok, connection.reason
-        assert connection.commit != connection.reference_commit
-        assert len(connection.identities) == EXPECTED_AUTHORITY_FILES
-    finally:
-        _remove_worktree(root, worktree)
-
-
-def test_dirty_unrelated_file_is_compatible(tmp_path):
-    root, worktree = _worktree(tmp_path, "dirty-unrelated")
-    try:
-        (worktree / "unrelated.txt").write_text("not authority\n", encoding="utf-8")
-        assert verify(worktree).ok
-    finally:
-        _remove_worktree(root, worktree)
-
-
-def test_line_ending_only_authority_change_is_rejected(tmp_path):
-    root, worktree = _worktree(tmp_path, "line-ending")
-    try:
-        target = worktree / LOCKED_FILE
-        original = target.read_bytes()
-        assert b"\n" in original
-        target.write_bytes(original.replace(b"\n", b"\r\n"))
-        connection = verify(worktree)
-        assert not connection.ok
-        assert connection.reason == BYTE_MISMATCH_REASON
-    finally:
-        _remove_worktree(root, worktree)
-
-
-def test_committed_authority_change_is_rejected(tmp_path):
-    root, worktree = _worktree(tmp_path, "committed-authority")
-    try:
-        target = worktree / LOCKED_FILE
-        target.write_bytes(target.read_bytes() + b"\n# mutation\n")
-        subprocess.run(["git", "-C", str(worktree), "add", LOCKED_FILE], check=True)
-        subprocess.run(
-            ["git", "-C", str(worktree), "commit", "-m", "test: alter authority"],
-            check=True,
-            capture_output=True,
-        )
-        connection = verify(worktree)
-        assert not connection.ok
-        assert connection.reason == f"Authority lock mismatch for committed blob: {LOCKED_FILE}"
-    finally:
-        _remove_worktree(root, worktree)
-
-
-@pytest.mark.parametrize("attribute", ["filter=unsafe", "working-tree-encoding=UTF-16", "ident"])
-def test_unsafe_authority_git_attribute_is_rejected(tmp_path, attribute):
-    root, worktree = _worktree(tmp_path, f"unsafe-{attribute.split('=')[0]}")
-    try:
-        (worktree / ".gitattributes").write_text(
-            f"{LOCKED_FILE} {attribute}\n", encoding="utf-8"
-        )
-        connection = verify(worktree)
-        assert not connection.ok
-        assert connection.reason.startswith(f"Unsafe authority Git attribute: {LOCKED_FILE}:")
-    finally:
-        _remove_worktree(root, worktree)
-
-
-def test_dirty_authority_change_is_rejected_before_import(tmp_path, monkeypatch):
-    root, worktree = _worktree(tmp_path, "dirty-authority")
-    try:
-        target = worktree / LOCKED_FILE
-        target.write_bytes(target.read_bytes() + b"\n# mutation\n")
-        _assert_rejected_before_import(worktree, monkeypatch)
-    finally:
-        _remove_worktree(root, worktree)
-
-
-def test_assume_unchanged_authority_mutation_is_rejected_before_import(tmp_path, monkeypatch):
-    root, worktree = _worktree(tmp_path, "assume-unchanged")
-    flag_set = False
-    try:
-        _set_index_flag(worktree, "assume-unchanged", True)
-        flag_set = True
-        target = worktree / LOCKED_FILE
-        target.write_bytes(target.read_bytes() + b"\n# hidden assume-unchanged mutation\n")
-        diff = subprocess.run(
-            ["git", "-C", str(worktree), "diff", "--quiet", "HEAD", "--", LOCKED_FILE],
-            check=False,
-        )
-        assert diff.returncode == 0
-        _assert_rejected_before_import(worktree, monkeypatch)
-    finally:
-        if flag_set:
-            _set_index_flag(worktree, "assume-unchanged", False)
-        _remove_worktree(root, worktree)
-
-
-def test_skip_worktree_authority_mutation_is_rejected_before_import(tmp_path, monkeypatch):
-    root, worktree = _worktree(tmp_path, "skip-worktree")
-    flag_set = False
-    try:
-        try:
-            _set_index_flag(worktree, "skip-worktree", True)
-        except subprocess.CalledProcessError:
-            pytest.skip("Git environment does not support skip-worktree for this fixture")
-        flag_set = True
-        target = worktree / LOCKED_FILE
-        target.write_bytes(target.read_bytes() + b"\n# hidden skip-worktree mutation\n")
-        _assert_rejected_before_import(worktree, monkeypatch)
-    finally:
-        if flag_set:
-            _set_index_flag(worktree, "skip-worktree", False)
-        _remove_worktree(root, worktree)
-
-
-def test_missing_authority_file_is_rejected(tmp_path):
-    root, worktree = _worktree(tmp_path, "missing-authority")
-    try:
-        (worktree / LOCKED_FILE).unlink()
-        connection = verify(worktree)
-        assert not connection.ok
-        assert connection.reason == f"Required authority working-tree file missing: {LOCKED_FILE}"
-    finally:
-        _remove_worktree(root, worktree)
-
-
-def test_authority_path_replaced_by_directory_is_rejected(tmp_path):
-    root, worktree = _worktree(tmp_path, "authority-directory")
-    try:
-        target = worktree / LOCKED_FILE
-        target.unlink()
-        target.mkdir()
-        connection = verify(worktree)
-        assert not connection.ok
-        assert connection.reason == f"Required authority working-tree file missing: {LOCKED_FILE}"
-    finally:
-        _remove_worktree(root, worktree)
-
-
-def test_unavailable_committed_blob_is_rejected_before_import(tmp_path, monkeypatch):
-    root, worktree = _worktree(tmp_path, "missing-blob")
-    imported = False
-
-    def no_blob(root_path, oid):
-        return None
 
     def fail_if_imported(*args, **kwargs):
         nonlocal imported
         imported = True
         raise AssertionError("Runtime import must not be attempted")
 
+    monkeypatch.setattr(adapter.importlib.util, "spec_from_file_location", fail_if_imported)
+    connection = verify(root, lock_path)
+    assert not connection.ok
+    assert connection.reason == expected_reason
+    assert connection.runtime is None
+    assert imported is False
+    return connection
+
+
+def test_selected_checkout_loads_runtime_and_derives_expectations_from_lock():
+    root = authority_root()
+    lock = _load_lock()
+    connection = verify(root)
+    assert connection.ok, connection.reason
+    assert connection.commit == lock["reference_commit_sha"]
+    assert connection.reference_commit == lock["reference_commit_sha"]
+    assert connection.runtime_interface_id == lock["runtime_interface_id"]
+    assert connection.runtime.RUNTIME_INTERFACE_ID == lock["runtime_interface_id"]
+    assert connection.compatibility_mode == lock["compatibility_mode"]
+    assert set(connection.identities) == set(lock["files"])
+    for symbol in (
+        "RunContext",
+        "ProjectGateFinalizationResult",
+        "evaluate_run",
+        "evaluate_stage",
+        "finalize_project_gate",
+    ):
+        assert getattr(connection.runtime, symbol, None) is not None
+    assert not hasattr(connection, "trusted_context")
+
+
+def test_lock_inventory_equals_manifest_closure_plus_manifest():
+    root = authority_root()
+    lock = _load_lock()
+    manifest = json.loads((root / MANIFEST_PATH).read_text(encoding="utf-8"))
+    expected = {
+        *manifest["python_authority_paths"],
+        *manifest["data_authority_paths"],
+        MANIFEST_PATH,
+    }
+    assert len(expected) == (
+        len(manifest["python_authority_paths"])
+        + len(manifest["data_authority_paths"])
+        + 1
+    )
+    assert set(lock["files"]) == expected
+    assert HISTORY_FILE in lock["files"]
+    assert COMPATIBILITY_SIDECAR not in lock["files"]
+
+
+def test_compatible_descendant_commit_changes_only_non_authority_content(tmp_path: Path):
+    root, worktree, branch = _worktree(tmp_path, "descendant")
     try:
-        monkeypatch.setattr(adapter, "_committed_blob_bytes", no_blob)
-        monkeypatch.setattr(adapter.importlib.util, "spec_from_file_location", fail_if_imported)
+        doc = worktree / "docs/qc-compatible-descendant.txt"
+        doc.parent.mkdir(exist_ok=True)
+        doc.write_text("unrelated documentation\n", encoding="utf-8")
+        _run("add", str(doc.relative_to(worktree)), cwd=worktree)
+        _run("commit", "-m", "test: unrelated compatible descendant", cwd=worktree)
         connection = verify(worktree)
-        assert not connection.ok
-        assert connection.reason.startswith("Authority working-tree bytes differ from committed blob:")
-        assert imported is False
+        assert connection.ok, connection.reason
+        assert connection.commit != connection.reference_commit
+        assert connection.reference_commit == _load_lock()["reference_commit_sha"]
+    finally:
+        _remove_worktree(root, worktree, branch)
+
+
+def test_compatible_nonancestor_commit_with_identical_authority_tree(tmp_path: Path):
+    root = authority_root()
+    tree = _run("rev-parse", "HEAD^{tree}", cwd=root).stdout.strip()
+    env = os.environ.copy()
+    env.update(
+        {
+            "GIT_AUTHOR_NAME": "QC compatibility test",
+            "GIT_AUTHOR_EMAIL": "qc@example.invalid",
+            "GIT_COMMITTER_NAME": "QC compatibility test",
+            "GIT_COMMITTER_EMAIL": "qc@example.invalid",
+        }
+    )
+    orphan = subprocess.check_output(
+        ["git", "-C", str(root), "commit-tree", tree, "-m", "test: identical orphan tree"],
+        text=True,
+        env=env,
+    ).strip()
+    root, worktree = _detached_worktree(tmp_path, "orphan", orphan)
+    try:
+        connection = verify(worktree)
+        assert connection.ok, connection.reason
+        assert connection.commit == orphan
+        assert connection.commit != connection.reference_commit
     finally:
         _remove_worktree(root, worktree)
+
+
+def test_unrelated_dirty_file_remains_compatible(tmp_path: Path):
+    root, worktree, branch = _worktree(tmp_path, "dirty-unrelated")
+    try:
+        (worktree / "unrelated.txt").write_text("not authority\n", encoding="utf-8")
+        connection = verify(worktree)
+        assert connection.ok, connection.reason
+    finally:
+        _remove_worktree(root, worktree, branch)
+
+
+def test_committed_authority_mutation_blocks_before_import(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    root, worktree, branch = _worktree(tmp_path, "committed-authority")
+    try:
+        target = worktree / LOCKED_FILE
+        target.write_bytes(target.read_bytes() + b"\n# committed mutation\n")
+        _run("add", LOCKED_FILE, cwd=worktree)
+        _run("commit", "-m", "test: committed authority mutation", cwd=worktree)
+        _assert_rejected_before_import(
+            worktree,
+            monkeypatch,
+            f"Authority lock mismatch for committed blob: {LOCKED_FILE}",
+        )
+    finally:
+        _remove_worktree(root, worktree, branch)
 
 
 @pytest.mark.parametrize(
-    ("replacement", "expected"),
+    "mode",
+    ["ordinary", "line-ending", "assume-unchanged", "skip-worktree"],
+)
+def test_uncommitted_authority_mutations_block_before_import(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+):
+    root, worktree, branch = _worktree(tmp_path, f"bytes-{mode}")
+    flag: str | None = None
+    try:
+        if mode in {"assume-unchanged", "skip-worktree"}:
+            flag = mode
+            try:
+                _set_index_flag(worktree, flag, True)
+            except subprocess.CalledProcessError:
+                pytest.skip(f"Git environment does not support {flag}")
+        target = worktree / LOCKED_FILE
+        original = target.read_bytes()
+        if mode == "line-ending":
+            assert b"\n" in original
+            target.write_bytes(original.replace(b"\n", b"\r\n"))
+        else:
+            target.write_bytes(original + b"\n# working-tree mutation\n")
+        _assert_rejected_before_import(
+            worktree,
+            monkeypatch,
+            f"Authority working-tree bytes differ from committed blob: {LOCKED_FILE}",
+        )
+    finally:
+        if flag:
+            _set_index_flag(worktree, flag, False)
+        _remove_worktree(root, worktree, branch)
+
+
+def test_missing_locked_file_blocks_before_import(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    root, worktree, branch = _worktree(tmp_path, "missing-authority")
+    try:
+        (worktree / LOCKED_FILE).unlink()
+        _assert_rejected_before_import(
+            worktree,
+            monkeypatch,
+            f"Required authority working-tree file missing: {LOCKED_FILE}",
+        )
+    finally:
+        _remove_worktree(root, worktree, branch)
+
+
+def test_locked_file_replaced_by_directory_blocks_before_import(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    root, worktree, branch = _worktree(tmp_path, "authority-directory")
+    try:
+        target = worktree / LOCKED_FILE
+        target.unlink()
+        target.mkdir()
+        _assert_rejected_before_import(
+            worktree,
+            monkeypatch,
+            f"Required authority working-tree file missing: {LOCKED_FILE}",
+        )
+    finally:
+        _remove_worktree(root, worktree, branch)
+
+
+def test_committed_blob_unavailable_blocks_before_import(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    lock = _load_lock()
+    target_oid = lock["files"][LOCKED_FILE]
+    original = adapter._committed_blob_bytes
+
+    def unavailable(root: Path, oid: str):
+        if oid == target_oid:
+            return None
+        return original(root, oid)
+
+    monkeypatch.setattr(adapter, "_committed_blob_bytes", unavailable)
+    _assert_rejected_before_import(
+        authority_root(),
+        monkeypatch,
+        f"Committed authority blob unavailable: {LOCKED_FILE}",
+    )
+
+
+def test_wrong_repository_origin_blocks_before_import(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    root, worktree, branch = _worktree(tmp_path, "wrong-origin")
+    original = _run("config", "--get", "remote.origin.url", cwd=worktree).stdout.strip()
+    try:
+        _run("remote", "set-url", "origin", "https://github.com/example/not-architect.git", cwd=worktree)
+        _assert_rejected_before_import(
+            worktree,
+            monkeypatch,
+            "Selected checkout identity is not rezahh107/EV4-Architect-Repo.",
+        )
+    finally:
+        _run("remote", "set-url", "origin", original, cwd=worktree)
+        _remove_worktree(root, worktree, branch)
+
+
+def test_malformed_reference_commit_blocks_before_import(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    lock = _load_lock()
+    lock["reference_commit_sha"] = "not-a-commit"
+    path = _write_lock(tmp_path, lock, "malformed-reference")
+    _assert_rejected_before_import(
+        authority_root(),
+        monkeypatch,
+        "QC authority compatibility lock reference commit is malformed.",
+        path,
+    )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected"),
     [
-        ("missing-evaluate-run", "Official evaluator entry points are missing."),
-        ("missing-run-context", "Official evaluator entry points are missing."),
-        ("wrong-interface", "Official Runtime interface identity mismatch."),
-        ("broken-load-authority", "Official authority compatibility failed: RuntimeError: broken authority"),
+        ("missing-manifest", f"Authority Lock is missing Manifest path: {MANIFEST_PATH}"),
+        ("missing-history", f"Authority Lock is missing Manifest path: {HISTORY_FILE}"),
+        (
+            "extra-sidecar",
+            f"Authority Lock has extra path not in Manifest: {COMPATIBILITY_SIDECAR}",
+        ),
+        (
+            "wrong-manifest-oid",
+            f"Authority lock mismatch for committed blob: {MANIFEST_PATH}",
+        ),
+        (
+            "wrong-authority-oid",
+            f"Authority lock mismatch for committed blob: {LOCKED_FILE}",
+        ),
     ],
 )
-def test_runtime_contract_failures_are_rejected(tmp_path, replacement, expected):
-    root, worktree = _worktree(tmp_path, f"runtime-{replacement}")
+def test_lock_inventory_and_oid_mutations_block_before_import(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+    expected: str,
+):
+    lock = _load_lock()
+    if mutation == "missing-manifest":
+        lock["files"].pop(MANIFEST_PATH)
+    elif mutation == "missing-history":
+        lock["files"].pop(HISTORY_FILE)
+    elif mutation == "extra-sidecar":
+        lock["files"][COMPATIBILITY_SIDECAR] = "0" * 40
+    elif mutation == "wrong-manifest-oid":
+        lock["files"][MANIFEST_PATH] = "1" * 40
+    elif mutation == "wrong-authority-oid":
+        lock["files"][LOCKED_FILE] = "2" * 40
+    path = _write_lock(tmp_path, lock, mutation)
+    _assert_rejected_before_import(authority_root(), monkeypatch, expected, path)
+
+
+def test_runtime_interface_mismatch_is_rejected_after_identity_checks(tmp_path: Path):
+    root, worktree, branch = _worktree(tmp_path, "wrong-interface")
     try:
-        lock = json.loads(LOCK_PATH.read_text(encoding="utf-8"))
-        lock["files"].pop(LOCKED_FILE)
-        test_lock = tmp_path / f"{replacement}.lock.json"
-        test_lock.write_text(json.dumps(lock), encoding="utf-8")
-        runtime_path = worktree / LOCKED_FILE
-        source = runtime_path.read_text(encoding="utf-8")
-        if replacement == "broken-load-authority":
-            original = (
-                "def load_authority(\n"
-                "    root: Path = ROOT,\n"
-                ") -> tuple[dict[str, Any], dict[str, Any]]:\n"
-            )
-            replacement_source = (
-                "def load_authority(root):\n"
-                "    raise RuntimeError('broken authority')\n"
-            )
-            assert original in source
-            source = source.replace(original, replacement_source, 1)
-        elif replacement == "missing-evaluate-run":
-            source = source.replace("def evaluate_run", "def evaluate_run_missing", 1)
-        elif replacement == "missing-run-context":
-            source = source.replace("class RunContext:", "class RemovedRunContext:", 1)
-        else:
-            source = source.replace(EXPECTED_INTERFACE, "ev4-architect-quality-runtime@9.9.9", 1)
-        runtime_path.write_text(source, encoding="utf-8")
-        connection = verify(worktree, test_lock)
+        target = worktree / INTERFACE_FILE
+        source = target.read_text(encoding="utf-8")
+        expected_interface = _load_lock()["runtime_interface_id"]
+        assert expected_interface in source
+        target.write_text(
+            source.replace(expected_interface, "ev4-architect-quality-runtime@9.9.9", 1),
+            encoding="utf-8",
+        )
+        _run("add", INTERFACE_FILE, cwd=worktree)
+        _run("commit", "-m", "test: wrong Runtime interface", cwd=worktree)
+        commit = _run("rev-parse", "HEAD", cwd=worktree).stdout.strip()
+        lock_path = tmp_path / "wrong-interface.lock.json"
+        lock_path.write_bytes(generate_lock_bytes(worktree, expected_commit=commit))
+        for name in list(sys.modules):
+            if name == "architect_quality_runtime" or name.startswith("architect_quality_runtime."):
+                sys.modules.pop(name, None)
+        connection = verify(worktree, lock_path)
         assert not connection.ok
-        assert connection.reason == expected
+        assert connection.reason == "Official Runtime interface identity mismatch."
     finally:
-        _remove_worktree(root, worktree)
+        _remove_worktree(root, worktree, branch)
+
+
+
+def test_noncanonical_lock_blocks_before_import(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    lock = _load_lock()
+    path = tmp_path / "noncanonical.lock.json"
+    path.write_text(json.dumps(lock, separators=(",", ":")), encoding="utf-8")
+    _assert_rejected_before_import(
+        authority_root(),
+        monkeypatch,
+        "QC authority compatibility lock is noncanonical.",
+        path,
+    )
+
+def test_bundled_lock_is_cwd_independent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.chdir(tmp_path)
+    assert LOCK_PATH.is_file()

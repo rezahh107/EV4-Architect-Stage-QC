@@ -13,27 +13,45 @@ jobs:
   windows:
     runs-on: windows-latest
     env:
-      ARCHITECT_HEAD_SHA: 9ac2843f2a90568e741c6bb279654c9ca178500b
       STAGE_QC_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Checkout exact Stage-QC head
         uses: actions/checkout@v4
         with:
           ref: ${{ env.STAGE_QC_HEAD_SHA }}
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Assert exact Stage-QC head
         shell: pwsh
         run: |
-          if ((git rev-parse HEAD) -ne $env:STAGE_QC_HEAD_SHA) { throw "Stage-QC exact-head mismatch" }
-          if ((git status --porcelain) -ne $null) { throw "Stage-QC checkout is not clean" }
+          if ((git rev-parse HEAD) -ne $env:STAGE_QC_HEAD_SHA) {
+            throw "Stage-QC exact-head mismatch"
+          }
+          if ((git status --porcelain) -ne $null) {
+            throw "Stage-QC checkout is not clean"
+          }
 
-      - name: Checkout exact Architect head
+      - name: Read Architect dependency identity from committed Lock
+        id: dependency_identity
+        shell: pwsh
+        run: |
+          $lock = Get-Content -Raw -LiteralPath "architect-authority.lock.json" | ConvertFrom-Json
+          $sha = [string]$lock.reference_commit_sha
+          if ($sha -cnotmatch '^[0-9a-f]{40}$') {
+            throw "Lock reference_commit_sha is malformed"
+          }
+          "ARCHITECT_HEAD_SHA=$sha" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "sha=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "architect_dependency_head=$sha"
+
+      - name: Checkout Architect dependency selected by Lock
         uses: actions/checkout@v4
         with:
           repository: rezahh107/EV4-Architect-Repo
-          ref: ${{ env.ARCHITECT_HEAD_SHA }}
+          ref: ${{ steps.dependency_identity.outputs.sha }}
           path: EV4-Architect-Repo
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Materialize exact committed Architect bytes
@@ -47,19 +65,34 @@ jobs:
             Remove-Item -Recurse -Force
           git -C $architect reset --hard $env:ARCHITECT_HEAD_SHA
 
-      - name: Assert exact Architect head and clean checkout
+      - name: Assert exact Architect dependency checkout
         shell: pwsh
         run: |
           $architect = Join-Path $env:GITHUB_WORKSPACE "EV4-Architect-Repo"
-          if ((git -C $architect rev-parse HEAD) -ne $env:ARCHITECT_HEAD_SHA) { throw "Architect exact-head mismatch" }
-          if ((git -C $architect status --porcelain) -ne $null) { throw "Architect checkout is not clean" }
+          if ((git -C $architect rev-parse HEAD) -ne $env:ARCHITECT_HEAD_SHA) {
+            throw "Architect exact-head mismatch"
+          }
+          if ((git -C $architect status --porcelain) -ne $null) {
+            throw "Architect checkout is not clean"
+          }
 
       - uses: astral-sh/setup-uv@v5
 
       - name: Install locked dependencies
         run: uv sync --locked
 
-      - name: Verify locked Runtime finalization interface and executed bytes
+      - name: Check canonical Architect authority Lock before Runtime import
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "src"
+          $architect = Join-Path $env:GITHUB_WORKSPACE "EV4-Architect-Repo"
+          uv run python -m ev4_architect_stage_qc.lock_generator `
+            --architect $architect `
+            --lock architect-authority.lock.json `
+            --expected-commit $env:ARCHITECT_HEAD_SHA `
+            --check
+
+      - name: Verify authority-file compatibility and executed bytes
         id: authority_verification
         continue-on-error: true
         shell: pwsh
@@ -68,47 +101,30 @@ jobs:
           $env:EV4_ARCHITECT_REPO = Join-Path $env:GITHUB_WORKSPACE "EV4-Architect-Repo"
           $env:AUTHORITY_DIAGNOSTIC = Join-Path $env:RUNNER_TEMP "stage-qc-authority-verification.json"
           @'
-          import hashlib
           import json
           import os
-          import subprocess
           from pathlib import Path
-          from ev4_architect_stage_qc.architect_adapter import verify
+
+          from ev4_architect_stage_qc.architect_adapter import LOCK_PATH, verify
 
           root = Path(os.environ["EV4_ARCHITECT_REPO"])
+          lock = json.loads(LOCK_PATH.read_text(encoding="utf-8"))
           connection = verify(root)
           diagnostic = {
               "connection_ok": connection.ok,
               "connection_reason": connection.reason,
-              "architect_head": connection.commit,
-              "reference_commit": connection.reference_commit,
+              "stage_qc_head": os.environ["STAGE_QC_HEAD_SHA"],
+              "architect_actual_head": connection.commit,
+              "architect_reference_head": connection.reference_commit,
               "runtime_interface_id": connection.runtime_interface_id,
-              "authority_files_observed": len(connection.identities),
+              "authority_file_count": len(lock["files"]),
               "authority_paths_observed": sorted(connection.identities),
+              "authority_paths_locked": sorted(lock["files"]),
               "finalization_callable": bool(
-                  connection.runtime and callable(getattr(connection.runtime, "finalize_project_gate", None))
+                  connection.runtime
+                  and callable(getattr(connection.runtime, "finalize_project_gate", None))
               ),
           }
-          if not connection.ok and connection.identities:
-              rel, oid = next(reversed(connection.identities.items()))
-              committed = subprocess.check_output(
-                  ["git", "-C", str(root), "cat-file", "blob", oid]
-              )
-              working = (root / rel).read_bytes()
-              limit = min(len(committed), len(working))
-              first_difference = next(
-                  (index for index in range(limit) if committed[index] != working[index]),
-                  limit if len(committed) != len(working) else None,
-              )
-              diagnostic["byte_comparison"] = {
-                  "path": rel,
-                  "oid": oid,
-                  "committed_length": len(committed),
-                  "working_length": len(working),
-                  "committed_sha256": hashlib.sha256(committed).hexdigest(),
-                  "working_sha256": hashlib.sha256(working).hexdigest(),
-                  "first_difference_index": first_difference,
-              }
           Path(os.environ["AUTHORITY_DIAGNOSTIC"]).write_text(
               json.dumps(diagnostic, indent=2, sort_keys=True) + "\n",
               encoding="utf-8",
@@ -116,38 +132,48 @@ jobs:
           print(json.dumps(diagnostic, indent=2, sort_keys=True))
           assert connection.ok, connection.reason
           assert connection.commit == os.environ["ARCHITECT_HEAD_SHA"]
-          assert connection.runtime_interface_id == "ev4-architect-quality-runtime@2.0.0"
-          assert len(connection.identities) == 32
+          assert connection.reference_commit == lock["reference_commit_sha"]
+          assert connection.runtime_interface_id == lock["runtime_interface_id"]
+          assert set(connection.identities) == set(lock["files"])
           assert callable(connection.runtime.finalize_project_gate)
           assert not hasattr(connection, "trusted_context")
           '@ | uv run python -
 
-      - name: Upload authority byte-verification diagnostic
+      - name: Upload authority verification diagnostic
         if: always() && steps.authority_verification.outcome != 'skipped'
         uses: actions/upload-artifact@v4
         with:
           name: stage-qc-authority-verification-${{ env.STAGE_QC_HEAD_SHA }}
           path: ${{ runner.temp }}/stage-qc-authority-verification.json
           if-no-files-found: error
-          retention-days: 3
+          retention-days: 7
 
-      - name: Enforce authority byte-verification result
+      - name: Enforce authority verification result
         if: steps.authority_verification.outcome != 'success'
         run: exit 1
 
-      - name: Compile Stage-QC finalization migration
+      - name: Compile Stage-QC identity compatibility repair
         shell: pwsh
         run: |
           $env:PYTHONPATH = "src"
           uv run python -m py_compile `
+            src/ev4_architect_stage_qc/lock_generator.py `
             src/ev4_architect_stage_qc/architect_adapter.py `
             src/ev4_architect_stage_qc/core.py `
-            src/ev4_architect_stage_qc/app.py `
+            tests/test_lock_generator.py `
             tests/test_architect_adapter.py `
             tests/test_context.py `
             tests/test_core_end_to_end.py
 
-      - name: Run exact cross-repository finalization suite
+      - name: Run Lock SSOT and identity-mirror tests
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "src"
+          $env:EV4_ARCHITECT_REPO = Join-Path $env:GITHUB_WORKSPACE "EV4-Architect-Repo"
+          $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD = "1"
+          uv run pytest -p no:cacheprovider -vv tests/test_lock_generator.py
+
+      - name: Run focused cross-repository compatibility suite
         id: integration_tests
         continue-on-error: true
         shell: pwsh
@@ -156,6 +182,7 @@ jobs:
           $env:EV4_ARCHITECT_REPO = Join-Path $env:GITHUB_WORKSPACE "EV4-Architect-Repo"
           $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD = "1"
           uv run pytest -p no:cacheprovider -vv `
+            tests/test_lock_generator.py `
             tests/test_architect_adapter.py `
             tests/test_context.py `
             tests/test_core_end_to_end.py `
@@ -169,7 +196,7 @@ jobs:
           name: stage-qc-cross-repository-integration-${{ env.STAGE_QC_HEAD_SHA }}
           path: ${{ runner.temp }}/stage-qc-cross-repository-integration.log
           if-no-files-found: error
-          retention-days: 3
+          retention-days: 7
 
       - name: Enforce cross-repository integration result
         if: steps.integration_tests.outcome != 'success'
@@ -182,17 +209,19 @@ jobs:
         run: |
           $env:PYTHONPATH = "src"
           $env:EV4_ARCHITECT_REPO = Join-Path $env:GITHUB_WORKSPACE "EV4-Architect-Repo"
-          uv run python -m pytest -q 2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP/stage-qc-full-tests.log"
+          $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD = "1"
+          uv run pytest -p no:cacheprovider -q `
+            2>&1 | Tee-Object -FilePath "$env:RUNNER_TEMP/stage-qc-full-tests.log"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Upload full Stage-QC test diagnostics
+      - name: Upload full Stage-QC diagnostics
         if: always() && steps.full_tests.outcome != 'skipped'
         uses: actions/upload-artifact@v4
         with:
           name: stage-qc-full-tests-${{ env.STAGE_QC_HEAD_SHA }}
           path: ${{ runner.temp }}/stage-qc-full-tests.log
           if-no-files-found: error
-          retention-days: 3
+          retention-days: 7
 
       - name: Enforce full Stage-QC result
         if: steps.full_tests.outcome != 'success'
