@@ -233,6 +233,6 @@ Prefix validation additionally proves only that a compatible selected checkout e
 
 ## Next Step
 
-Run the canonical Lock check and full local suite, then push the focused feature branch and obtain exact-Head Windows workflow evidence in one open pull request. Do not Merge, approve, or enable auto-merge from this implementation state.
+Obtain exact-Head Windows workflow evidence on the open focused pull request. Keep the pull request unmerged and unapproved, with auto-merge disabled, until repository review and the owner’s formal decision.
 
 Separately, `rezahh107/EV4-Architect-Repo` should evaluate provenance semantics through its own authority process. Any resulting Architect authority change requires a later, separate reviewed Stage-QC Lock-update PR; it must not be combined with this feature.
