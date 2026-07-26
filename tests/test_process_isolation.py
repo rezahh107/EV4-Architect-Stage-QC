@@ -170,12 +170,17 @@ def _is_forbidden_origin(origin: str) -> bool:
     return origin in FORBIDDEN_PROCESS_ORIGINS or origin.startswith("multiprocessing.")
 
 
-def _resolve_origin(node: ast.AST, bindings: dict[str, str]) -> str | None:
+def _resolve_origins(
+    node: ast.AST,
+    bindings: dict[str, frozenset[str]],
+) -> frozenset[str]:
     if isinstance(node, ast.Name):
-        return bindings.get(node.id)
+        return bindings.get(node.id, frozenset())
     if isinstance(node, ast.Attribute):
-        parent = _resolve_origin(node.value, bindings)
-        return f"{parent}.{node.attr}" if parent else None
+        return frozenset(
+            f"{parent}.{node.attr}"
+            for parent in _resolve_origins(node.value, bindings)
+        )
     if (
         isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
@@ -185,79 +190,296 @@ def _resolve_origin(node: ast.AST, bindings: dict[str, str]) -> str | None:
         and isinstance(node.args[1], ast.Constant)
         and isinstance(node.args[1].value, str)
     ):
-        parent = _resolve_origin(node.args[0], bindings)
-        return f"{parent}.{node.args[1].value}" if parent else None
-    return None
+        return frozenset(
+            f"{parent}.{node.args[1].value}"
+            for parent in _resolve_origins(node.args[0], bindings)
+        )
+    return frozenset()
+
+
+def _merge_binding_environments(
+    *environments: dict[str, frozenset[str]],
+) -> dict[str, frozenset[str]]:
+    names = set().union(*(environment.keys() for environment in environments))
+    merged: dict[str, frozenset[str]] = {}
+    for name in names:
+        origins = frozenset().union(
+            *(environment.get(name, frozenset()) for environment in environments)
+        )
+        if origins:
+            merged[name] = origins
+    return merged
+
+
+def _star_import_forbidden_origins(module: str) -> tuple[str, ...]:
+    if _is_forbidden_origin(module):
+        return (module,)
+    return tuple(
+        origin
+        for origin in sorted(FORBIDDEN_PROCESS_ORIGINS)
+        if origin.rpartition(".")[0] == module
+    )
 
 
 def _forbidden_origin_violations(
     tree: ast.Module,
 ) -> list[tuple[str, str, int]]:
-    bindings: dict[str, str] = {}
     violations: set[tuple[str, str, int]] = set()
-    assignments: list[tuple[str, ast.AST, int]] = []
 
     def record(origin: str, binding: str, node: ast.AST) -> None:
         violations.add((origin, binding, getattr(node, "lineno", 0)))
 
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.asname:
-                    local_name = alias.asname
-                    canonical = alias.name
+    def inspect_expression(
+        node: ast.AST | None,
+        bindings: dict[str, frozenset[str]],
+    ) -> None:
+        if node is None:
+            return
+        for candidate in ast.walk(node):
+            if not isinstance(candidate, ast.Call):
+                continue
+            for origin in sorted(_resolve_origins(candidate.func, bindings)):
+                if _is_forbidden_origin(origin):
+                    record(
+                        origin,
+                        _dotted_name(candidate.func) or origin,
+                        candidate,
+                    )
+
+    def bind_assignment(
+        targets: list[ast.expr],
+        value: ast.AST,
+        bindings: dict[str, frozenset[str]],
+    ) -> None:
+        origins = _resolve_origins(value, bindings)
+        for target in targets:
+            if not isinstance(target, ast.Name):
+                continue
+            if origins:
+                bindings[target.id] = origins
+                for origin in sorted(origins):
+                    if _is_forbidden_origin(origin):
+                        record(origin, target.id, target)
+            else:
+                bindings.pop(target.id, None)
+
+    def clear_target(
+        target: ast.AST,
+        bindings: dict[str, frozenset[str]],
+    ) -> None:
+        if isinstance(target, ast.Name):
+            bindings.pop(target.id, None)
+        elif isinstance(target, (ast.Tuple, ast.List)):
+            for element in target.elts:
+                clear_target(element, bindings)
+
+    def nested_scope_bindings(
+        bindings: dict[str, frozenset[str]],
+        arguments: ast.arguments | None = None,
+    ) -> dict[str, frozenset[str]]:
+        nested = dict(bindings)
+        if arguments is not None:
+            for argument in (
+                list(arguments.posonlyargs)
+                + list(arguments.args)
+                + list(arguments.kwonlyargs)
+            ):
+                nested.pop(argument.arg, None)
+            if arguments.vararg is not None:
+                nested.pop(arguments.vararg.arg, None)
+            if arguments.kwarg is not None:
+                nested.pop(arguments.kwarg.arg, None)
+        return nested
+
+    def process_statements(
+        statements: list[ast.stmt],
+        bindings: dict[str, frozenset[str]],
+    ) -> dict[str, frozenset[str]]:
+        environment = dict(bindings)
+        for statement in statements:
+            if isinstance(statement, ast.Import):
+                for alias in statement.names:
+                    if alias.asname:
+                        local_name = alias.asname
+                        canonical = alias.name
+                    else:
+                        local_name = alias.name.split(".", 1)[0]
+                        canonical = local_name
+                    environment[local_name] = frozenset({canonical})
+                    if _is_forbidden_origin(alias.name):
+                        record(alias.name, local_name, statement)
+                continue
+
+            if isinstance(statement, ast.ImportFrom):
+                module = "." * statement.level + (statement.module or "")
+                for alias in statement.names:
+                    if alias.name == "*":
+                        for origin in _star_import_forbidden_origins(module):
+                            record(origin, f"{module}.*", statement)
+                        continue
+                    canonical = f"{module}.{alias.name}" if module else alias.name
+                    local_name = alias.asname or alias.name
+                    environment[local_name] = frozenset({canonical})
+                    if _is_forbidden_origin(canonical):
+                        record(canonical, local_name, statement)
+                continue
+
+            if isinstance(statement, ast.Assign):
+                inspect_expression(statement.value, environment)
+                bind_assignment(statement.targets, statement.value, environment)
+                continue
+
+            if isinstance(statement, ast.AnnAssign):
+                inspect_expression(statement.annotation, environment)
+                inspect_expression(statement.value, environment)
+                if statement.value is not None:
+                    bind_assignment([statement.target], statement.value, environment)
                 else:
-                    local_name = alias.name.split(".", 1)[0]
-                    canonical = local_name
-                bindings[local_name] = canonical
-                if _is_forbidden_origin(alias.name):
-                    record(alias.name, local_name, node)
-        elif isinstance(node, ast.ImportFrom):
-            module = "." * node.level + (node.module or "")
-            for alias in node.names:
-                if alias.name == "*":
-                    for origin in sorted(FORBIDDEN_PROCESS_ORIGINS):
-                        if origin == module or origin.startswith(f"{module}."):
-                            record(origin, f"{module}.*", node)
-                    continue
-                canonical = f"{module}.{alias.name}" if module else alias.name
-                local_name = alias.asname or alias.name
-                bindings[local_name] = canonical
-                if _is_forbidden_origin(canonical):
-                    record(canonical, local_name, node)
-        elif isinstance(node, ast.Assign) and len(node.targets) == 1:
-            target = node.targets[0]
-            if isinstance(target, ast.Name):
-                assignments.append((target.id, node.value, node.lineno))
-        elif (
-            isinstance(node, ast.AnnAssign)
-            and isinstance(node.target, ast.Name)
-            and node.value is not None
-        ):
-            assignments.append((node.target.id, node.value, node.lineno))
+                    clear_target(statement.target, environment)
+                continue
 
-    for _ in range(len(assignments) + 1):
-        changed = False
-        for local_name, value, _ in assignments:
-            origin = _resolve_origin(value, bindings)
-            if origin is not None and bindings.get(local_name) != origin:
-                bindings[local_name] = origin
-                changed = True
-        if not changed:
-            break
+            if isinstance(statement, ast.AugAssign):
+                inspect_expression(statement.target, environment)
+                inspect_expression(statement.value, environment)
+                clear_target(statement.target, environment)
+                continue
 
-    for local_name, _, lineno in assignments:
-        origin = bindings.get(local_name)
-        if origin is not None and _is_forbidden_origin(origin):
-            violations.add((origin, local_name, lineno))
+            if isinstance(statement, ast.Expr):
+                inspect_expression(statement.value, environment)
+                continue
 
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        origin = _resolve_origin(node.func, bindings)
-        if origin is not None and _is_forbidden_origin(origin):
-            record(origin, _dotted_name(node.func) or origin, node)
+            if isinstance(statement, ast.Return):
+                inspect_expression(statement.value, environment)
+                continue
 
+            if isinstance(statement, ast.Raise):
+                inspect_expression(statement.exc, environment)
+                inspect_expression(statement.cause, environment)
+                continue
+
+            if isinstance(statement, ast.Assert):
+                inspect_expression(statement.test, environment)
+                inspect_expression(statement.msg, environment)
+                continue
+
+            if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                for decorator in statement.decorator_list:
+                    inspect_expression(decorator, environment)
+                for default in statement.args.defaults:
+                    inspect_expression(default, environment)
+                for default in statement.args.kw_defaults:
+                    inspect_expression(default, environment)
+                inspect_expression(statement.returns, environment)
+                process_statements(
+                    statement.body,
+                    nested_scope_bindings(environment, statement.args),
+                )
+                environment.pop(statement.name, None)
+                continue
+
+            if isinstance(statement, ast.ClassDef):
+                for decorator in statement.decorator_list:
+                    inspect_expression(decorator, environment)
+                for base in statement.bases:
+                    inspect_expression(base, environment)
+                for keyword in statement.keywords:
+                    inspect_expression(keyword.value, environment)
+                process_statements(
+                    statement.body,
+                    nested_scope_bindings(environment),
+                )
+                environment.pop(statement.name, None)
+                continue
+
+            if isinstance(statement, ast.If):
+                inspect_expression(statement.test, environment)
+                body_environment = process_statements(statement.body, environment)
+                else_environment = process_statements(statement.orelse, environment)
+                environment = _merge_binding_environments(
+                    body_environment,
+                    else_environment,
+                )
+                continue
+
+            if isinstance(statement, (ast.For, ast.AsyncFor)):
+                inspect_expression(statement.iter, environment)
+                body_start = dict(environment)
+                clear_target(statement.target, body_start)
+                body_environment = process_statements(statement.body, body_start)
+                else_environment = process_statements(statement.orelse, environment)
+                environment = _merge_binding_environments(
+                    environment,
+                    body_environment,
+                    else_environment,
+                )
+                continue
+
+            if isinstance(statement, ast.While):
+                inspect_expression(statement.test, environment)
+                body_environment = process_statements(statement.body, environment)
+                else_environment = process_statements(statement.orelse, environment)
+                environment = _merge_binding_environments(
+                    environment,
+                    body_environment,
+                    else_environment,
+                )
+                continue
+
+            if isinstance(statement, (ast.With, ast.AsyncWith)):
+                body_start = dict(environment)
+                for item in statement.items:
+                    inspect_expression(item.context_expr, environment)
+                    if item.optional_vars is not None:
+                        clear_target(item.optional_vars, body_start)
+                body_environment = process_statements(statement.body, body_start)
+                environment = _merge_binding_environments(
+                    environment,
+                    body_environment,
+                )
+                continue
+
+            if isinstance(statement, (ast.Try, ast.TryStar)):
+                body_environment = process_statements(statement.body, environment)
+                normal_environment = process_statements(
+                    statement.orelse,
+                    body_environment,
+                )
+                branch_environments = [normal_environment]
+                for handler in statement.handlers:
+                    inspect_expression(handler.type, environment)
+                    handler_start = dict(environment)
+                    if handler.name:
+                        handler_start.pop(handler.name, None)
+                    branch_environments.append(
+                        process_statements(handler.body, handler_start)
+                    )
+                merged = _merge_binding_environments(*branch_environments)
+                environment = process_statements(statement.finalbody, merged)
+                continue
+
+            if isinstance(statement, ast.Match):
+                inspect_expression(statement.subject, environment)
+                case_environments = [dict(environment)]
+                for case in statement.cases:
+                    inspect_expression(case.guard, environment)
+                    case_environments.append(
+                        process_statements(case.body, environment)
+                    )
+                environment = _merge_binding_environments(*case_environments)
+                continue
+
+            if isinstance(statement, ast.Delete):
+                for target in statement.targets:
+                    clear_target(target, environment)
+                continue
+
+            for child in ast.iter_child_nodes(statement):
+                if isinstance(child, ast.expr):
+                    inspect_expression(child, environment)
+
+        return environment
+
+    process_statements(tree.body, {})
     return sorted(violations)
 
 
@@ -403,6 +625,105 @@ def test_binding_aware_guard_rejects_forbidden_origin_aliases(
     ],
 )
 def test_binding_aware_guard_accepts_harmless_controls(source: str):
+    assert _forbidden_origin_violations(ast.parse(source)) == []
+
+
+@pytest.mark.parametrize(
+    ("source", "expected_origin"),
+    [
+        (
+            "import os as platform\n"
+            "platform.fork()\n"
+            "import harmless as platform\n",
+            "os.fork",
+        ),
+        (
+            "import os as platform\n"
+            "platform.forkpty()\n"
+            "import harmless as platform\n",
+            "os.forkpty",
+        ),
+        (
+            "import concurrent.futures as cf\n"
+            "cf.ProcessPoolExecutor()\n"
+            "import harmless as cf\n",
+            "concurrent.futures.ProcessPoolExecutor",
+        ),
+        (
+            "import importlib as loader\n"
+            "loader.reload(module)\n"
+            "import harmless as loader\n",
+            "importlib.reload",
+        ),
+        (
+            "import os as platform\n"
+            "clone = platform.fork\n"
+            "import harmless as platform\n"
+            "clone()\n",
+            "os.fork",
+        ),
+    ],
+)
+def test_binding_aware_guard_uses_source_order_for_calls_and_assignments(
+    source: str,
+    expected_origin: str,
+):
+    violations = _forbidden_origin_violations(ast.parse(source))
+
+    assert expected_origin in {origin for origin, _, _ in violations}
+
+
+def test_binding_aware_guard_applies_rebind_before_call():
+    source = (
+        "import os as platform\n"
+        "import harmless as platform\n"
+        "platform.fork()\n"
+    )
+
+    assert _forbidden_origin_violations(ast.parse(source)) == []
+
+
+def test_binding_aware_guard_merges_branch_origins_conservatively():
+    source = (
+        "import harmless as platform\n"
+        "if condition:\n"
+        "    import os as platform\n"
+        "platform.fork()\n"
+    )
+
+    violations = _forbidden_origin_violations(ast.parse(source))
+
+    assert "os.fork" in {origin for origin, _, _ in violations}
+
+
+@pytest.mark.parametrize(
+    ("source", "expected_origin"),
+    [
+        ("from multiprocessing import *\n", "multiprocessing"),
+        (
+            "from multiprocessing.context import *\n",
+            "multiprocessing.context",
+        ),
+        ("from multiprocessing.pool import *\n", "multiprocessing.pool"),
+    ],
+)
+def test_binding_aware_guard_rejects_multiprocessing_star_imports(
+    source: str,
+    expected_origin: str,
+):
+    violations = _forbidden_origin_violations(ast.parse(source))
+
+    assert violations == [(expected_origin, f"{expected_origin}.*", 1)]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from os.path import *\n",
+        "from concurrent.futures.thread import *\n",
+    ],
+)
+def test_binding_aware_guard_accepts_harmless_star_imports(source: str):
     assert _forbidden_origin_violations(ast.parse(source)) == []
 
 
