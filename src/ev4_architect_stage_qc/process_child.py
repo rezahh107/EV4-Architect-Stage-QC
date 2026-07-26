@@ -18,6 +18,7 @@ _COMMON_REQUEST_FIELDS = {
 }
 _OPERATION_FIELDS = {
     "verify_connection": set(),
+    "run_prefix_validation": {"stage_output_folder", "source_kind"},
     "run_prefinal_validation": {"stage_output_folder", "source_kind"},
     "run_final_validation": {
         "stage_output_folder",
@@ -217,6 +218,17 @@ def _prefinal(request: dict[str, Any]) -> dict[str, Any]:
     return _validation_payload(request, result)
 
 
+def _prefix(request: dict[str, Any]) -> dict[str, Any]:
+    from .core import run_prefix_validation
+
+    result = run_prefix_validation(
+        Path(request["stage_output_folder"]),
+        Path(request["architect_repository_path"]),
+        source_kind=request["source_kind"],
+    )
+    return _validation_payload(request, result)
+
+
 def _final(request: dict[str, Any]) -> dict[str, Any]:
     from .core import run_final_validation
 
@@ -233,6 +245,8 @@ def _execute(request: dict[str, Any]) -> dict[str, Any]:
     operation = request["operation"]
     if operation == "verify_connection":
         return _verify(request)
+    if operation == "run_prefix_validation":
+        return _prefix(request)
     if operation == "run_prefinal_validation":
         return _prefinal(request)
     if operation == "run_final_validation":

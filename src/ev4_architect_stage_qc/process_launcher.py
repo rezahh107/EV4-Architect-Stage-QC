@@ -427,6 +427,22 @@ def run_prefinal_validation(
     )
 
 
+def run_prefix_validation(
+    stage_output_folder: Path,
+    architect_repository_path: Path,
+    *,
+    source_kind: str = "live_conversation",
+) -> CoreResult:
+    return _validation_result(
+        "run_prefix_validation",
+        {
+            "architect_repository_path": _path_text(architect_repository_path),
+            "stage_output_folder": _path_text(stage_output_folder),
+            "source_kind": source_kind,
+        },
+    )
+
+
 def run_final_validation(
     stage_output_folder: Path,
     terminal_stage_output_path: Path,

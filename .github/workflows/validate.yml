@@ -167,23 +167,11 @@ jobs:
         if: steps.authority_verification.outcome != 'success'
         run: exit 1
 
-      - name: Compile Stage-QC fresh-process repair
+      - name: Compile Stage-QC sources and tests
         shell: pwsh
         run: |
           $env:PYTHONPATH = "src"
-          uv run python -m py_compile `
-            src/ev4_architect_stage_qc/models.py `
-            src/ev4_architect_stage_qc/process_launcher.py `
-            src/ev4_architect_stage_qc/process_child.py `
-            src/ev4_architect_stage_qc/app.py `
-            src/ev4_architect_stage_qc/lock_generator.py `
-            src/ev4_architect_stage_qc/architect_adapter.py `
-            src/ev4_architect_stage_qc/core.py `
-            tests/test_process_isolation.py `
-            tests/test_lock_generator.py `
-            tests/test_architect_adapter.py `
-            tests/test_context.py `
-            tests/test_core_end_to_end.py
+          uv run python -m compileall -q src tests
 
       - name: Run Lock SSOT and identity-mirror tests
         shell: pwsh
@@ -203,6 +191,8 @@ jobs:
           $env:PYTEST_DISABLE_PLUGIN_AUTOLOAD = "1"
           uv run pytest -p no:cacheprovider -vv `
             tests/test_process_isolation.py `
+            tests/test_prefix_validation.py `
+            tests/test_app.py `
             tests/test_lock_generator.py `
             tests/test_architect_adapter.py `
             tests/test_context.py `
