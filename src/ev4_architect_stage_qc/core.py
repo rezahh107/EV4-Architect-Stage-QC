@@ -19,7 +19,7 @@ from .json_io import (
 from .models import CoreResult
 
 APP_VERSION = "0.3.0"
-PREFIX_CONTEXT_VERSION = "1.0.0"
+PREFIX_CONTEXT_VERSION = "1.1.0"
 PREFIX_RESULT_FIELDS = {
     "status",
     "errors",
@@ -415,16 +415,92 @@ def _valid_run_state(
     )
 
 
+def _prefix_repair_plan(
+    *,
+    blocking_issues: list[dict[str, Any]],
+    observed_stage_ids: list[str],
+    failed_stage: str,
+    manifest: dict[str, Any],
+) -> tuple[dict[str, Any] | None, str]:
+    stages, _, _ = _manifest_prefix_authority(manifest)
+    manifest_stage_ids = [item["stage_id"] for item in stages]
+    manifest_positions = {
+        stage_id: index for index, stage_id in enumerate(manifest_stage_ids)
+    }
+    if (
+        not observed_stage_ids
+        or failed_stage not in manifest_positions
+        or failed_stage != observed_stage_ids[-1]
+        or any(stage_id not in manifest_positions for stage_id in observed_stage_ids)
+        or observed_stage_ids
+        != manifest_stage_ids[: len(observed_stage_ids)]
+    ):
+        return (
+            None,
+            "Runtime repair plan cannot be projected from the observed Manifest prefix.",
+        )
+
+    failed_position = manifest_positions[failed_stage]
+    target_stage_ids: set[str] = set()
+    for issue in blocking_issues:
+        repair_stage = issue.get("repair_stage")
+        if not isinstance(repair_stage, str) or not repair_stage:
+            return (
+                None,
+                "Runtime repair plan contains a null or malformed repair_stage.",
+            )
+        if repair_stage not in manifest_positions:
+            return (
+                None,
+                "Runtime repair plan contains a repair_stage unknown to the loaded Manifest.",
+            )
+        if manifest_positions[repair_stage] > failed_position:
+            return (
+                None,
+                "Runtime repair plan contains a repair_stage later than the failed Stage.",
+            )
+        if repair_stage not in observed_stage_ids:
+            return (
+                None,
+                "Runtime repair plan contains a repair_stage outside the observed prefix.",
+            )
+        target_stage_ids.add(repair_stage)
+
+    ordered_repair_stage_ids = [
+        stage_id
+        for stage_id in observed_stage_ids
+        if stage_id in target_stage_ids
+    ]
+    if not ordered_repair_stage_ids:
+        return None, "Runtime repair plan contains no actionable repair_stage."
+    earliest_repair_stage = ordered_repair_stage_ids[0]
+    earliest_position = observed_stage_ids.index(earliest_repair_stage)
+    return (
+        {
+            "ordered_repair_stage_ids": ordered_repair_stage_ids,
+            "earliest_repair_stage": earliest_repair_stage,
+            "retained_stage_ids": observed_stage_ids[:earliest_position],
+            "invalidated_stage_ids": observed_stage_ids[earliest_position:],
+            "runtime_replay_required": True,
+        },
+        "",
+    )
+
+
 def _classify_prefix_result(
     run: Any,
     outputs: list[dict[str, Any]],
     manifest: dict[str, Any],
     result_schema: dict[str, Any],
-) -> tuple[str | None, str]:
+) -> tuple[str | None, str, dict[str, Any] | None]:
     if not isinstance(run, dict) or set(run) != PREFIX_RESULT_FIELDS:
-        return None, "Runtime result does not match the verified top-level contract."
+        return (
+            None,
+            "Runtime result does not match the verified top-level contract.",
+            None,
+        )
     if run.get("status") not in {"valid", "invalid"}:
-        return None, "Runtime returned an unknown top-level status."
+        return None, "Runtime returned an unknown top-level status.", None
     if (
         not isinstance(run.get("errors"), list)
         or any(not isinstance(item, str) for item in run["errors"])
@@ -441,7 +517,7 @@ def _classify_prefix_result(
         or any(not isinstance(item, str) for item in run["stages_visited"])
         or not isinstance(run.get("all_required_stages_visited"), bool)
     ):
-        return None, "Runtime result fields are malformed."
+        return None, "Runtime result fields are malformed.", None
 
     _, _, terminal = _manifest_prefix_authority(manifest)
     results = run["results"]
@@ -450,10 +526,18 @@ def _classify_prefix_result(
         or not results
         or run["terminal_stage"] != terminal["stage_id"]
     ):
-        return None, "Runtime did not return one bounded Stage Result per input."
+        return (
+            None,
+            "Runtime did not return one bounded Stage Result per input.",
+            None,
+        )
     validator = Draft202012Validator(result_schema)
     if any(list(validator.iter_errors(item)) for item in results):
-        return None, "Runtime returned a Stage Result that fails its public Schema."
+        return (
+            None,
+            "Runtime returned a Stage Result that fails its public Schema.",
+            None,
+        )
     result_stage_ids = [item["stage_id"] for item in results]
     output_stage_ids = [item["stage_id"] for item in outputs]
     if (
@@ -465,12 +549,16 @@ def _classify_prefix_result(
             for result, output in zip(results, outputs, strict=True)
         )
     ):
-        return None, "Runtime Stage Result identity does not match the prefix."
+        return None, "Runtime Stage Result identity does not match the prefix.", None
 
     last = results[-1]
     prior_ids = output_stage_ids[:-1]
     if any(item.get("stage_status") != "pass" for item in results[:-1]):
-        return None, "Runtime returned results after an unsuccessful prior Stage."
+        return (
+            None,
+            "Runtime returned results after an unsuccessful prior Stage.",
+            None,
+        )
 
     stages, _, _ = _manifest_prefix_authority(manifest)
     by_stage = {item["stage_id"]: item for item in stages}
@@ -492,8 +580,12 @@ def _classify_prefix_result(
                 derived_stage_results=results,
             )
         ):
-            return None, "Runtime pass result, successor, and Run State are inconsistent."
-        return "PREFIX_VALID", ""
+            return (
+                None,
+                "Runtime pass result, successor, and Run State are inconsistent.",
+                None,
+            )
+        return "PREFIX_VALID", "", None
 
     if status in {"needs_input", "blocked"}:
         if (
@@ -510,14 +602,28 @@ def _classify_prefix_result(
                 derived_stage_results=results[:-1],
             )
         ):
-            return None, "Runtime unsuccessful result and preserved Run State are inconsistent."
+            return (
+                None,
+                "Runtime unsuccessful result and preserved Run State are inconsistent.",
+                None,
+            )
+        repair_plan, repair_plan_error = _prefix_repair_plan(
+            blocking_issues=last["blocking_issues"],
+            observed_stage_ids=output_stage_ids,
+            failed_stage=last["stage_id"],
+            manifest=manifest,
+        )
+        if repair_plan is None:
+            return None, repair_plan_error, None
         return (
             "PREFIX_NEEDS_INPUT"
             if status == "needs_input"
-            else "PREFIX_BLOCKED"
-        ), ""
+            else "PREFIX_BLOCKED",
+            "",
+            repair_plan,
+        )
 
-    return None, "Runtime returned an unrecognized Stage status."
+    return None, "Runtime returned an unrecognized Stage status.", None
 
 
 def _runtime_diagnostics(run: Any) -> str:
@@ -662,6 +768,7 @@ def _input_context(
     outputs: list[dict[str, Any]],
     identities: list[dict[str, Any]],
     run: dict[str, Any],
+    repair_plan: dict[str, Any],
     source_kind: str,
 ) -> dict[str, Any]:
     result = run["results"][-1]
@@ -676,6 +783,7 @@ def _input_context(
         "authority": _authority_projection(connection),
         "run_id": outputs[0]["run_id"],
         "affected_stage": result["stage_id"],
+        "repair_plan": repair_plan,
         "needs_input_stage_result": result,
         "official_blocking_issues": result["blocking_issues"],
         "evaluator_returned_prior_preserved_run_state": run["run_state"],
@@ -684,10 +792,14 @@ def _input_context(
         "input_file_identities": identities,
         "instruction": (
             "Supply only the missing user or source evidence identified by "
-            "official_blocking_issues for the affected Stage. The failed Stage has "
-            "not passed; no continuation is authorized and the next Stage must not "
-            "be produced. The supplied Run State is evaluator-returned prior/preserved "
-            "context, not acceptance of the failed Stage."
+            "official_blocking_issues. Modify only the Stage Output named by "
+            "repair_plan.earliest_repair_stage. Do not reuse any Stage Output listed "
+            "in repair_plan.invalidated_stage_ids and do not continue to a later "
+            "Stage. No continuation is authorized. After the repair, rerun current "
+            "Pipeline prefix validation. "
+            "affected_stage identifies the failed evaluated Stage and may differ "
+            "from the repair target. The supplied Run State is evaluator-returned "
+            "prior/preserved context, not acceptance of the failed Stage."
         ),
         "evidence_boundary": dict(EVIDENCE_BOUNDARY),
     }
@@ -699,6 +811,7 @@ def _repair_context(
     outputs: list[dict[str, Any]],
     identities: list[dict[str, Any]],
     run: dict[str, Any],
+    repair_plan: dict[str, Any],
     source_kind: str,
 ) -> dict[str, Any]:
     result = run["results"][-1]
@@ -713,17 +826,22 @@ def _repair_context(
         "authority": _authority_projection(connection),
         "run_id": outputs[0]["run_id"],
         "affected_stage": result["stage_id"],
+        "repair_plan": repair_plan,
         "blocked_stage_result": result,
         "official_blocking_issues": result["blocking_issues"],
         "evaluator_returned_prior_preserved_run_state": run["run_state"],
         "input_snapshot": outputs,
         "input_file_identities": identities,
         "instruction": (
-            "Repair only the affected Stage Output according to "
-            "official_blocking_issues. The affected Stage has not passed; no "
-            "continuation is authorized, next_stage is unavailable for execution, "
-            "and later Stage Outputs must not be generated. Stage-QC has not "
-            "independently reinterpreted the failure."
+            "Repair only the Stage Output named by "
+            "repair_plan.earliest_repair_stage according to "
+            "official_blocking_issues. Do not reuse any Stage Output listed in "
+            "repair_plan.invalidated_stage_ids and do not continue to a later "
+            "Stage. No continuation is authorized. After the repair, rerun current "
+            "Pipeline prefix validation. "
+            "affected_stage identifies the failed evaluated Stage and may differ "
+            "from the repair target. Stage-QC has not independently reinterpreted "
+            "the failure."
         ),
         "evidence_boundary": dict(EVIDENCE_BOUNDARY),
     }
@@ -765,17 +883,21 @@ def run_prefix_validation(
             require_terminal=False,
             run_context=_run_context(connection, source_kind),
         )
-        code, classification_error = _classify_prefix_result(
+        code, classification_error, repair_plan = _classify_prefix_result(
             run,
             outputs,
             manifest,
             result_schema,
         )
         if code is None:
-            reason = "; ".join(
-                item
-                for item in (classification_error, _runtime_diagnostics(run))
-                if item
+            reason = (
+                classification_error
+                if classification_error.startswith("Runtime repair plan")
+                else "; ".join(
+                    item
+                    for item in (classification_error, _runtime_diagnostics(run))
+                    if item
+                )
             )
             return _record(
                 attempt,
@@ -817,6 +939,7 @@ def run_prefix_validation(
                 outputs=outputs,
                 identities=identities,
                 run=run,
+                repair_plan=repair_plan,
                 source_kind=source_kind,
             )
             success = False
@@ -831,6 +954,7 @@ def run_prefix_validation(
                 outputs=outputs,
                 identities=identities,
                 run=run,
+                repair_plan=repair_plan,
                 source_kind=source_kind,
             )
             success = False
@@ -857,11 +981,11 @@ def run_prefix_validation(
             str(exc),
             "Correct the Stage Output folder and run again.",
         )
-    except Exception as exc:
+    except Exception:
         return _record(
             attempt,
             "PREFIX_EVALUATION_UNCLASSIFIED",
-            f"{type(exc).__name__}: {exc}",
+            "Runtime evaluation failed before a safe prefix outcome could be classified.",
             "Review diagnostics; no model-action context was issued.",
         )
 

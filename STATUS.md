@@ -1,7 +1,7 @@
 # STATUS — EV4 Architect Stage QC
 
-Version: 1.0.0
-Status: prefix_validation_implemented_locally_validated_exact_head_ci_pending
+Version: 1.1.0
+Status: prefix_repair_stage_routing_implemented_locally_validated_exact_head_ci_pending
 Last update: 2026-07-27
 
 ## Current Authority
@@ -16,9 +16,9 @@ runtime_interface_id: ev4-architect-quality-runtime@2.0.0
 compatibility_mode: authority_file_identity
 locked_architect_reference_commit: 60946aa40506692a17cd086a92866ad03adab21d
 merged_baseline_status: merged
-current_feature: Validate Current Pipeline Prefix
+current_feature: Validate Current Pipeline Prefix repair-stage routing
 current_feature_branch: feat/validate-current-pipeline-prefix
-current_feature_status: implemented_locally_validated
+current_feature_status: repair_implemented_locally_validated
 current_feature_exact_head_ci: pending
 application_mode: local_windows_first_tkinter_gui
 production_deployment: not_applicable_local_tool
@@ -36,10 +36,14 @@ local_validation_state: locally_validated
 exact_head_ci_state: pending
 merge_state: not_merged
 architect_dependency_mutated: false
+prefix_context_version: 1.1.0
 accepted_prefix_lengths: 1_through_11_nonterminal_stages
 prefix_authority: live_architect_pipeline_manifest
 evaluation_authority: official_public_runtime_evaluate_run
 fresh_process_operation: run_prefix_validation
+repair_stage_authority: runtime_blocking_issue_repair_stage
+repair_order_authority: loaded_architect_pipeline_manifest
+invalid_repair_plan_behavior: prefix_evaluation_unclassified_without_action_context
 outcomes:
   pass: PREFIX_VALID
   needs_input: PREFIX_NEEDS_INPUT
@@ -49,15 +53,17 @@ outcomes:
 
 The feature snapshots source Stage Outputs byte-for-byte, reloads only the snapshot through strict JSON, and evaluates the exact contiguous Manifest prefix through the official public Runtime with `require_terminal=False`. It does not change Prefinal or Final validation, create a second evaluator, derive a successor independently, or persist an independent authoritative Run State.
 
-Classifiable outcomes record evaluator-derived Stage Results and evaluator-returned Run State. Exactly one next-stage, missing-input, or affected-Stage repair context is issued. A malformed or incomplete Runtime result produces diagnostics only.
+Classifiable outcomes record evaluator-derived Stage Results and evaluator-returned Run State. Exactly one next-stage, missing-input, or repair context is issued. Input and repair contexts preserve `affected_stage` as the failed evaluated Stage and add a `repair_plan` containing Manifest-ordered unique targets, the earliest repair target, retained Stage IDs, invalidated Stage IDs, and a required Runtime replay marker.
 
-Local validation completed on the feature worktree after implementation:
+Every Runtime-issued `blocking_issues[*].repair_stage` is validated. Null, malformed, unknown, out-of-prefix, or forward targets fail closed as `PREFIX_EVALUATION_UNCLASSIFIED`; no input, repair, or next-stage context is issued. Stage-QC does not call `apply_partial_rerun` or create a parallel Run State.
+
+Current local validation state after the repair:
 
 ```yaml
 compileall_src_tests: success
-focused_prefix_and_gui_tests: 31_passed
-focused_process_core_adapter_lock_regression: 132_passed
-full_suite: 163_passed
+focused_prefix_tests: 38_passed
+focused_process_core_adapter_lock_regression: 158_passed
+full_suite: 173_passed
 canonical_lock_check: success
 exact_head_windows_workflow: pending
 ```
@@ -141,7 +147,9 @@ Stage-QC is a consumer and local validator. It must not copy the Runtime, create
 
 ## Exact-Head Windows CI Evidence
 
-The evidence below belongs to the previously merged Runtime v2 consumer Head. It is not evidence for the current prefix-validation feature branch.
+PR #8 previously completed `validate` run `30219638832` successfully on exact Head `b9b27507cb54007ca0800c3cd0e686372231481c`. That evidence became stale when the repair changed the Head and is not evidence for the current repair.
+
+The evidence below belongs to the previously merged Runtime v2 consumer Head. It is also not evidence for the current prefix-validation repair.
 
 ```yaml
 workflow: validate
@@ -177,7 +185,7 @@ manual_architect_checkout_selection: available
 architect_connection_verification: available
 prefinal_stage_output_validation: available
 terminal_stage_output_validation: available
-current_pipeline_prefix_validation: implemented_locally_validated_exact_head_ci_pending
+current_pipeline_prefix_validation: repair_stage_routing_implemented_locally_validated_exact_head_ci_pending
 fresh_process_isolation: enforced
 runtime_origin_reporting: enforced
 lock_manifest_inventory_check: enforced

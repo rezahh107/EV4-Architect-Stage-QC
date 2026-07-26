@@ -13,6 +13,7 @@ from ev4_architect_stage_qc.core import (
     EVIDENCE_BOUNDARY,
     PREFIX_RESULT_FIELDS,
     _discover_prefix,
+    _prefix_repair_plan,
     run_prefinal_validation,
     run_prefix_validation,
 )
@@ -96,6 +97,7 @@ def test_official_runtime_accepts_every_nonempty_contiguous_prefix(
     receipt = generated(result, "architect-prefix-qc-receipt.json")
     stage_results = generated(result, "architect-prefix-stage-results.json")
     run_state = generated(result, "architect-prefix-run-state.json")
+    assert context["context_version"] == "1.1.0"
     assert context["validated_stage_ids"] == [
         item["stage_id"] for item in outputs[:length]
     ]
@@ -271,7 +273,7 @@ def test_official_unsuccessful_stage_is_classified_without_continuation(
     issue = {
         "issue_id": f"TEST_{expected_code}",
         "reason": "Bounded official Runtime issue.",
-        "repair_stage": values[-1]["stage_id"],
+        "repair_stage": "/research",
         "kind": kind,
     }
     values[-1]["blockers"] = [issue]
@@ -291,6 +293,7 @@ def test_official_unsuccessful_stage_is_classified_without_continuation(
     )
     assert other not in names
     context = generated(result, context_name)
+    assert context["context_version"] == "1.1.0"
     assert context["official_blocking_issues"] == [
         {
             "issue_id": issue["issue_id"],
@@ -299,11 +302,186 @@ def test_official_unsuccessful_stage_is_classified_without_continuation(
         }
     ]
     assert context["affected_stage"] == "/decompose"
+    assert context["repair_plan"] == {
+        "ordered_repair_stage_ids": ["/research"],
+        "earliest_repair_stage": "/research",
+        "retained_stage_ids": ["/intake"],
+        "invalidated_stage_ids": ["/research", "/decompose"],
+        "runtime_replay_required": True,
+    }
     assert context["evaluator_returned_prior_preserved_run_state"][
         "completed_stages"
     ] == ["/intake", "/research"]
-    assert "no continuation is authorized" in context["instruction"]
+    assert "no continuation is authorized" in context["instruction"].casefold()
+    assert "repair_plan.earliest_repair_stage" in context["instruction"]
+    assert "repair_plan.invalidated_stage_ids" in context["instruction"]
+    assert "rerun current Pipeline prefix validation" in context["instruction"]
     assert context["evidence_boundary"] == EVIDENCE_BOUNDARY
+
+
+@pytest.mark.parametrize(
+    ("expected_code", "kind", "context_name"),
+    [
+        (
+            "PREFIX_NEEDS_INPUT",
+            "user_input",
+            "architect-prefix-input-context.json",
+        ),
+        (
+            "PREFIX_BLOCKED",
+            "quality",
+            "architect-prefix-repair-context.json",
+        ),
+    ],
+)
+def test_same_stage_repair_target_remains_actionable(
+    tmp_path: Path,
+    expected_code: str,
+    kind: str,
+    context_name: str,
+):
+    root = authority_root()
+    outputs, _ = architect_outputs(root)
+    values = copy.deepcopy(outputs[:3])
+    values[-1]["blockers"] = [
+        {
+            "issue_id": f"TEST_SAME_STAGE_{expected_code}",
+            "reason": "Repair the evaluated Stage.",
+            "repair_stage": "/decompose",
+            "kind": kind,
+        }
+    ]
+    folder = stage_folder(tmp_path, values)
+
+    result = run_prefix_validation(folder, root, source_kind="fixture")
+
+    assert result.code == expected_code
+    context = generated(result, context_name)
+    assert context["affected_stage"] == "/decompose"
+    assert context["repair_plan"] == {
+        "ordered_repair_stage_ids": ["/decompose"],
+        "earliest_repair_stage": "/decompose",
+        "retained_stage_ids": ["/intake", "/research"],
+        "invalidated_stage_ids": ["/decompose"],
+        "runtime_replay_required": True,
+    }
+
+
+@pytest.mark.parametrize(
+    "issue_order",
+    [
+        ["/decompose", "/intake", "/research", "/intake"],
+        ["/research", "/intake", "/decompose", "/research"],
+    ],
+)
+def test_multiple_repair_targets_are_unique_and_manifest_ordered(
+    tmp_path: Path,
+    issue_order: list[str],
+):
+    root = authority_root()
+    outputs, _ = architect_outputs(root)
+    values = copy.deepcopy(outputs[:3])
+    values[-1]["blockers"] = [
+        {
+            "issue_id": f"TEST_MULTI_{index}",
+            "reason": "Manifest-ordered Runtime repair target.",
+            "repair_stage": repair_stage,
+            "kind": "quality",
+        }
+        for index, repair_stage in enumerate(issue_order)
+    ]
+    folder = stage_folder(tmp_path, values)
+
+    result = run_prefix_validation(folder, root, source_kind="fixture")
+
+    assert result.code == "PREFIX_BLOCKED"
+    context = generated(result, "architect-prefix-repair-context.json")
+    assert context["affected_stage"] == "/decompose"
+    assert context["repair_plan"] == {
+        "ordered_repair_stage_ids": ["/intake", "/research", "/decompose"],
+        "earliest_repair_stage": "/intake",
+        "retained_stage_ids": [],
+        "invalidated_stage_ids": ["/intake", "/research", "/decompose"],
+        "runtime_replay_required": True,
+    }
+
+
+@pytest.mark.parametrize(
+    ("repair_stage", "reason"),
+    [
+        (None, "null or malformed repair_stage"),
+        ("/unknown", "unknown to the loaded Manifest"),
+        ("/project-gate-export", "later than the failed Stage"),
+        ("/architectures", "later than the failed Stage"),
+        ("", "did not return one bounded Stage Result per input"),
+    ],
+    ids=["null", "unknown", "out-of-prefix-terminal", "forward", "malformed"],
+)
+def test_invalid_repair_targets_fail_closed_without_action_context(
+    tmp_path: Path,
+    repair_stage,
+    reason: str,
+):
+    root = authority_root()
+    outputs, _ = architect_outputs(root)
+    values = copy.deepcopy(outputs[:3])
+    values[-1]["blockers"] = [
+        {
+            "issue_id": "TEST_INVALID_REPAIR_TARGET",
+            "reason": "Invalid Runtime repair target.",
+            "repair_stage": repair_stage,
+            "kind": "quality",
+        }
+    ]
+    folder = stage_folder(tmp_path, values)
+
+    result = run_prefix_validation(folder, root, source_kind="fixture")
+
+    assert result.code == "PREFIX_EVALUATION_UNCLASSIFIED"
+    assert reason in result.reason
+    assert generated_names(result) == set()
+
+
+def test_repair_plan_uses_manifest_order_not_lexical_or_issue_order():
+    manifest = read_json(
+        authority_root() / "manifests/architect-pipeline-manifest.v1.json"
+    )
+    observed = [
+        "/intake",
+        "/research",
+        "/decompose",
+        "/architectures",
+        "/score-evidence",
+    ]
+    issues = [
+        {"repair_stage": "/score-evidence"},
+        {"repair_stage": "/decompose"},
+        {"repair_stage": "/architectures"},
+    ]
+
+    plan, error = _prefix_repair_plan(
+        blocking_issues=issues,
+        observed_stage_ids=observed,
+        failed_stage="/score-evidence",
+        manifest=manifest,
+    )
+
+    assert error == ""
+    assert plan == {
+        "ordered_repair_stage_ids": [
+            "/decompose",
+            "/architectures",
+            "/score-evidence",
+        ],
+        "earliest_repair_stage": "/decompose",
+        "retained_stage_ids": ["/intake", "/research"],
+        "invalidated_stage_ids": [
+            "/decompose",
+            "/architectures",
+            "/score-evidence",
+        ],
+        "runtime_replay_required": True,
+    }
 
 
 def test_caller_authority_rejection_is_unclassified_and_issues_no_context(

@@ -19,7 +19,7 @@ architect-authority.lock.json
 
 1. Start the app. It detects a sibling `../EV4-Architect-Repo` checkout when available; otherwise use **Select Architect Repository**.
 2. Use **Verify Architect Connection**. A compatible checkout is remembered in `%LOCALAPPDATA%\EV4ArchitectStageQC\settings.json` only after verification.
-3. During an active Run, select a folder containing any non-empty contiguous Pipeline prefix and choose **Validate Current Pipeline Prefix**. Use the single generated model-action context to produce the exact next Stage Output, obtain only missing evidence, or repair only the blocked Stage.
+3. During an active Run, select a folder containing any non-empty contiguous Pipeline prefix and choose **Validate Current Pipeline Prefix**. Use the single generated model-action context to produce the exact next Stage Output, obtain only missing evidence, or repair only the earliest Runtime-selected repair Stage.
 4. Repeat prefix validation Stage by Stage as needed. The existing eleven-Stage **Run Prefinal Validation** remains available when the full prefinal history is ready.
 5. Open the Prefinal attempt folder and provide `generated-artifacts/architect-final-stage-context.json` to the model.
 6. The model must produce a **Stage Output**, not a Stage Result or a PASS claim. Select that `/project-gate-export` JSON and run **Final Validation**.
@@ -38,6 +38,10 @@ One of four bounded outcomes is produced:
 - `PREFIX_EVALUATION_UNCLASSIFIED`: Runtime failed before a structurally valid bounded Stage Result and Run State could support safe classification; diagnostics are retained and no model-action context is issued.
 
 Every classifiable attempt also records the evaluator-derived Stage Results, the evaluator-returned Run State, input byte identities, the selected checkout identity, Runtime module origins, and the explicit evidence boundary. Prefix validation does not replace Prefinal Validation, Final Validation, Project Gate finalization, or Architect-owned continuation semantics.
+
+Input and repair contexts use context version `1.1.0`. `affected_stage` remains the failed evaluated Stage. The additive `repair_plan` validates every Runtime-issued `blocking_issues[*].repair_stage`, deduplicates and orders targets by the loaded Pipeline Manifest, identifies `earliest_repair_stage`, and separates `retained_stage_ids` from `invalidated_stage_ids`. Modify only the earliest repair target, do not reuse invalidated outputs, do not continue, and rerun prefix validation after the repair.
+
+A null, malformed, unknown, out-of-prefix, or forward `repair_stage` cannot default to the failed Stage. It produces `PREFIX_EVALUATION_UNCLASSIFIED`, retains bounded diagnostics, and issues no model-action context.
 
 ## Fresh-process execution boundary
 
@@ -83,7 +87,7 @@ Stage-QC is a consumer and local validator. It must not copy the Runtime, create
 - **Stale Lock:** review the Architect authority change, then regenerate the canonical Lock from the explicitly selected checkout.
 - **Changed authority file:** restore exact committed bytes or deliberately regenerate the Lock after review.
 - **Missing/duplicate/wrong version Stage:** correct the selected Stage Output folder.
-- **Official evaluation failure:** follow its affected-stage diagnostic; caller-generated PASS/digest/next-stage fields are not authoritative.
+- **Official evaluation failure:** keep `affected_stage` as the failed Stage and follow the context's Manifest-ordered `repair_plan`; caller-generated PASS/digest/next-stage fields are not authoritative.
 - **Terminal failure:** correct the model-produced terminal Stage Output or its upstream evidence, then replay.
 
 ## Developer validation
