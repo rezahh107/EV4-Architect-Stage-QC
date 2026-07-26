@@ -11,6 +11,7 @@ from tkinter import filedialog, messagebox, ttk
 from .models import ConnectionResult, CoreResult
 from .process_launcher import (
     run_final_validation,
+    run_prefix_validation,
     run_prefinal_validation,
     sibling_checkout,
     verify_connection,
@@ -88,6 +89,12 @@ class Application:
             command=self.prefinal,
         )
         self.pref.grid(column=0, row=7, sticky="w")
+        self.prefix = ttk.Button(
+            frame,
+            text="Validate Current Pipeline Prefix",
+            command=self.prefix_validation,
+        )
+        self.prefix.grid(column=0, row=8, sticky="w", pady=(10, 0))
         self.open_button = ttk.Button(
             frame,
             text="Open Result Folder",
@@ -97,7 +104,7 @@ class Application:
         self.open_button.grid(column=1, row=7, sticky="w")
         self._row(
             frame,
-            8,
+            9,
             "Project Gate Export Request JSON",
             self.terminal,
             self.select_terminal,
@@ -108,7 +115,7 @@ class Application:
             text="Run Final Validation",
             command=self.final_validation,
         )
-        self.final.grid(column=0, row=10, sticky="w")
+        self.final.grid(column=0, row=11, sticky="w")
         for child in frame.winfo_children():
             child.grid_configure(padx=4)
 
@@ -156,6 +163,7 @@ class Application:
 
     def _set_actions(self, state: str):
         self.verify_button.configure(state=state)
+        self.prefix.configure(state=state)
         self.pref.configure(state=state)
         self.final.configure(state=state)
 
@@ -208,6 +216,13 @@ class Application:
         self._start(
             "validation",
             run_prefinal_validation,
+            (Path(self.folder.get()), Path(self.architect.get())),
+        )
+
+    def prefix_validation(self):
+        self._start(
+            "validation",
+            run_prefix_validation,
             (Path(self.folder.get()), Path(self.architect.get())),
         )
 

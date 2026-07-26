@@ -13,6 +13,7 @@ import pytest
 import ev4_architect_stage_qc.process_launcher as launcher
 from ev4_architect_stage_qc.process_launcher import (
     run_final_validation,
+    run_prefix_validation,
     run_prefinal_validation,
     verify_connection,
 )
@@ -807,6 +808,7 @@ def test_repository_locks_fresh_interpreter_creation_and_child_import_timing():
 
     expected_local_imports = {
         "_verify": "architect_adapter",
+        "_prefix": "core",
         "_prefinal": "core",
         "_final": "core",
     }
@@ -861,6 +863,7 @@ def test_every_operation_uses_a_fresh_child_and_preserves_valid_results(
     terminal_path = terminal_file(tmp_path, terminal)
 
     first_verify = verify_connection(root)
+    prefix = run_prefix_validation(folder, root, source_kind="fixture")
     prefinal = run_prefinal_validation(folder, root, source_kind="fixture")
     final = run_final_validation(
         folder,
@@ -871,6 +874,7 @@ def test_every_operation_uses_a_fresh_child_and_preserves_valid_results(
     second_verify = verify_connection(root)
 
     assert first_verify.ok and second_verify.ok
+    assert prefix.success and prefix.code == "PREFIX_VALID"
     assert prefinal.success and prefinal.code == "PREFINAL_VALID"
     assert not final.success and final.code == "FINAL_HANDOFF_BLOCKED"
     assert prefinal.attempt_path is not None
@@ -885,14 +889,15 @@ def test_every_operation_uses_a_fresh_child_and_preserves_valid_results(
 
     pids = {
         first_verify.child_pid,
+        prefix.child_pid,
         prefinal.child_pid,
         final.child_pid,
         second_verify.child_pid,
     }
     assert None not in pids
     assert os.getpid() not in pids
-    assert len(pids) == 4
-    for result in (first_verify, prefinal, final, second_verify):
+    assert len(pids) == 5
+    for result in (first_verify, prefix, prefinal, final, second_verify):
         _assert_origins(result, root)
 
 
@@ -1017,6 +1022,59 @@ def test_child_rejects_forbidden_request_fields(tmp_path: Path):
             "payload": {"forbidden": True},
         },
     )
+    environment = os.environ.copy()
+    source_root = str(Path(__file__).resolve().parents[1] / "src")
+    environment["PYTHONPATH"] = source_root
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            launcher.CHILD_MODULE,
+            "--request",
+            str(request_path),
+            "--result",
+            str(result_path),
+        ],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0
+    result = read_json(result_path)
+    assert result["status"] == "error"
+    assert result["error_code"] == "MALFORMED_REQUEST"
+    assert result["child_pid"] != os.getpid()
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "stage_results",
+        "run_state",
+        "payload",
+        "provenance",
+        "continuation_authority",
+        "handoff_allowed",
+    ],
+)
+def test_prefix_child_protocol_rejects_caller_authority_fields(
+    tmp_path: Path,
+    field: str,
+):
+    request_path = tmp_path / "request.json"
+    result_path = tmp_path / "result.json"
+    request = {
+        "protocol_version": launcher.PROTOCOL_VERSION,
+        "request_id": f"forbidden-prefix-{field}",
+        "operation": "run_prefix_validation",
+        "architect_repository_path": str(authority_root()),
+        "stage_output_folder": str(tmp_path / "stages"),
+        "source_kind": "fixture",
+        field: {"forbidden": True},
+    }
+    write_json(request_path, request)
     environment = os.environ.copy()
     source_root = str(Path(__file__).resolve().parents[1] / "src")
     environment["PYTHONPATH"] = source_root

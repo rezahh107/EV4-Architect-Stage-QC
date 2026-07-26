@@ -19,15 +19,33 @@ architect-authority.lock.json
 
 1. Start the app. It detects a sibling `../EV4-Architect-Repo` checkout when available; otherwise use **Select Architect Repository**.
 2. Use **Verify Architect Connection**. A compatible checkout is remembered in `%LOCALAPPDATA%\EV4ArchitectStageQC\settings.json` only after verification.
-3. Select the folder containing the eleven prefinal Stage Output JSON files, then choose **Run Prefinal Validation**.
-4. Open the resulting attempt folder and provide `generated-artifacts/architect-final-stage-context.json` to the model.
-5. The model must produce a **Stage Output**, not a Stage Result or a PASS claim. Select that `/project-gate-export` JSON and run **Final Validation**.
+3. During an active Run, select a folder containing any non-empty contiguous Pipeline prefix and choose **Validate Current Pipeline Prefix**. Use the single generated model-action context to produce the exact next Stage Output, obtain only missing evidence, or repair only the earliest Runtime-selected repair Stage.
+4. Repeat prefix validation Stage by Stage as needed. The existing eleven-Stage **Run Prefinal Validation** remains available when the full prefinal history is ready.
+5. Open the Prefinal attempt folder and provide `generated-artifacts/architect-final-stage-context.json` to the model.
+6. The model must produce a **Stage Output**, not a Stage Result or a PASS claim. Select that `/project-gate-export` JSON and run **Final Validation**.
 
 Each run creates a new `results/attempt-####` folder beside the selected Stage folder. Inputs are copied before evaluation; source files are never changed. Failed attempts retain diagnostics.
 
+## Current Pipeline Prefix validation
+
+**Validate Current Pipeline Prefix** accepts exactly one through eleven nonterminal Stage Outputs when they form the exact leading slice of the live Architect Pipeline Manifest. Files are ordered by Manifest identity rather than filename, copied byte-for-byte into the attempt snapshot, reloaded through strict JSON, and evaluated only through the official public Runtime with `require_terminal=False`.
+
+One of four bounded outcomes is produced:
+
+- `PREFIX_VALID`: the last evaluator-derived Stage Result passed and Runtime supplied the legal successor; use `architect-next-stage-context.json`.
+- `PREFIX_NEEDS_INPUT`: Runtime identified missing input; use `architect-prefix-input-context.json` only to obtain that evidence. No continuation is authorized.
+- `PREFIX_BLOCKED`: Runtime identified a Stage defect; use `architect-prefix-repair-context.json` only to repair that Stage. No continuation is authorized.
+- `PREFIX_EVALUATION_UNCLASSIFIED`: Runtime failed before a structurally valid bounded Stage Result and Run State could support safe classification; diagnostics are retained and no model-action context is issued.
+
+Every classifiable attempt also records the evaluator-derived Stage Results, the evaluator-returned Run State, input byte identities, the selected checkout identity, Runtime module origins, and the explicit evidence boundary. Prefix validation does not replace Prefinal Validation, Final Validation, Project Gate finalization, or Architect-owned continuation semantics.
+
+Input and repair contexts use context version `1.1.0`. `affected_stage` remains the failed evaluated Stage. The additive `repair_plan` validates every Runtime-issued `blocking_issues[*].repair_stage`, deduplicates and orders targets by the loaded Pipeline Manifest, identifies `earliest_repair_stage`, and separates `retained_stage_ids` from `invalidated_stage_ids`. Modify only the earliest repair target, do not reuse invalidated outputs, do not continue, and rerun prefix validation after the repair.
+
+A null, malformed, unknown, out-of-prefix, or forward `repair_stage` cannot default to the failed Stage. It produces `PREFIX_EVALUATION_UNCLASSIFIED`, retains bounded diagnostics, and issues no model-action context.
+
 ## Fresh-process execution boundary
 
-Every connection verification, prefinal validation, and final validation starts a new Python interpreter, performs exactly one operation, returns a bounded JSON-compatible result, and exits. The Tkinter parent may wait in a background thread, but it never imports or executes the Architect Adapter, Architect Runtime, or Core validation functions.
+Every connection verification, prefix validation, prefinal validation, and final validation starts a new Python interpreter, performs exactly one operation, returns a bounded JSON-compatible result, and exits. The Tkinter parent may wait in a background thread, but it never imports or executes the Architect Adapter, Architect Runtime, or Core validation functions.
 
 The parent request contains only the protocol identity, request identity, operation name, selected checkout path, bounded input paths, and `source_kind` where applicable. Payloads, Stage Results, Run State, provenance, eligibility, Runtime objects, callables, artifacts, receipts, and Handoff authority are not accepted through this boundary. Child startup, exit, transport, identity, schema, or operation failures are deterministic and fail closed; a result from a previous operation is never reused.
 
@@ -46,6 +64,8 @@ Locked Runtime, Manifest, Schema, validator, and Project Gate contract files rem
 Strict JSON rejects malformed UTF-8, BOMs, duplicate keys, non-finite numbers, and non-object inputs. Raw-file SHA-256 identifies Stage Output input bytes. Authority identity uses committed Git blob OIDs plus exact working-tree byte equality. Canonical JSON SHA-256 identifies semantic JSON using sorted keys, compact separators, UTF-8, and `allow_nan=False`; these modes are intentionally distinct.
 
 Prefinal artifacts are deterministic. Attempt IDs, timestamps, and paths are deliberately separated into `attempt-metadata.json`. A receipt is input-bound evidence only; Final Validation always replays all original prefinal Stage Outputs through the official evaluator.
+
+Stage-QC verifies execution authority: the selected compatible checkout executed the official Runtime, and the reported Stage Results and Run State were evaluator-derived. It does not verify whether a claimed `user_confirmation` was actually stated, whether an evidence reference semantically supports a claim, or whether arbitrary Stage-authored provenance is true. Prefix receipts and contexts therefore report `semantic_provenance_truth_verified: false` and `trusted_evidence_content_binding_verified: false`; Schema-valid Stage Output is not rejected on a new Stage-QC-owned provenance rule when the official Runtime accepts it.
 
 ## Architect ownership boundary
 
@@ -67,7 +87,7 @@ Stage-QC is a consumer and local validator. It must not copy the Runtime, create
 - **Stale Lock:** review the Architect authority change, then regenerate the canonical Lock from the explicitly selected checkout.
 - **Changed authority file:** restore exact committed bytes or deliberately regenerate the Lock after review.
 - **Missing/duplicate/wrong version Stage:** correct the selected Stage Output folder.
-- **Official evaluation failure:** follow its affected-stage diagnostic; caller-generated PASS/digest/next-stage fields are not authoritative.
+- **Official evaluation failure:** keep `affected_stage` as the failed Stage and follow the context's Manifest-ordered `repair_plan`; caller-generated PASS/digest/next-stage fields are not authoritative.
 - **Terminal failure:** correct the model-produced terminal Stage Output or its upstream evidence, then replay.
 
 ## Developer validation
