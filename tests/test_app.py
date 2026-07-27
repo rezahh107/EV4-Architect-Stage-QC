@@ -3,6 +3,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
+
 import ev4_architect_stage_qc.app as app_module
 from ev4_architect_stage_qc.app import (
     STATUS_PRESENTATIONS,
@@ -35,9 +37,11 @@ class Button:
         self.states: list[str] = []
         self.texts: list[str] = []
         self.visible = True
+        self.state = "normal"
 
     def configure(self, **values):
         if "state" in values:
+            self.state = values["state"]
             self.states.append(values["state"])
         if "text" in values:
             self.texts.append(values["text"])
@@ -101,6 +105,131 @@ def status_application() -> Application:
     application.last_attempt = Path("old-attempt")
     application.open_button = Button()
     return application
+
+
+def operation_application() -> Application:
+    application = status_application()
+    application.architect = Value("selected/architect")
+    application.folder = Value("selected/stages")
+    application.terminal = Value("selected/final.json")
+    application.verify_button = Button()
+    application.prefix = Button()
+    application.pref = Button()
+    application.final = Button()
+    application._input_widgets = [Button(), Button(), Button()]
+    application._active_input_signature = None
+    application.open_button.configure(state="normal")
+    return application
+
+
+def test_start_invalidates_prior_attempt_before_processing_and_worker_start(monkeypatch):
+    application = operation_application()
+    observed = {}
+    original_show_processing = application._show_processing
+
+    def observe_processing(kind):
+        observed["before_processing"] = (
+            application.last_attempt,
+            application.open_button.state,
+        )
+        original_show_processing(kind)
+
+    class FakeThread:
+        def __init__(self, *, target, args, daemon):
+            observed["at_construction"] = (
+                application.last_attempt,
+                application.open_button.state,
+                application.status_label.get(),
+            )
+            self.target = target
+            self.args = args
+            self.daemon = daemon
+
+        def start(self):
+            observed["at_start"] = (
+                application.last_attempt,
+                application.open_button.state,
+                application.status_label.get(),
+            )
+
+    application._show_processing = observe_processing
+    monkeypatch.setattr(app_module.threading, "Thread", FakeThread)
+
+    application._start("validation", lambda: None, ())
+
+    assert observed["before_processing"] == (None, "disabled")
+    assert observed["at_construction"] == (None, "disabled", "● Validating…")
+    assert observed["at_start"] == (None, "disabled", "● Validating…")
+
+
+@pytest.mark.parametrize("connection_ok", [True, False])
+def test_connection_start_and_completion_never_publish_prior_result_folder(
+    monkeypatch, connection_ok
+):
+    application = operation_application()
+
+    class FakeThread:
+        def __init__(self, **kwargs):
+            pass
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr(app_module.threading, "Thread", FakeThread)
+    monkeypatch.setattr(app_module, "save_architect_path", lambda path: None)
+
+    application._start("connection", lambda: None, ())
+    result = ConnectionResult(
+        connection_ok,
+        Path("selected/architect"),
+        "a" * 40 if connection_ok else None,
+        (
+            "Compatible Architect Runtime authority-file identity closure."
+            if connection_ok
+            else "Authority verification failed."
+        ),
+        reference_commit="a" * 40 if connection_ok else None,
+    )
+    application._handle_connection(result)
+
+    assert application.last_attempt is None
+    assert application.open_button.state == "disabled"
+
+
+def test_current_validation_attempt_is_the_only_result_folder_capability():
+    application = status_application()
+    current_attempt = Path("attempt-current")
+
+    application._handle_validation(
+        CoreResult(
+            True,
+            current_attempt,
+            "PREFINAL_VALID",
+            "Validation completed.",
+            "Open the result folder.",
+        )
+    )
+
+    assert application.last_attempt == current_attempt
+    assert application.open_button.state == "normal"
+
+
+def test_validation_without_attempt_clears_and_disables_result_folder_capability():
+    application = status_application()
+    application.open_button.configure(state="normal")
+
+    application._handle_validation(
+        CoreResult(
+            False,
+            None,
+            "PREFINAL_INPUT_INVALID",
+            "No attempt was created.",
+            "Correct the selected input.",
+        )
+    )
+
+    assert application.last_attempt is None
+    assert application.open_button.state == "disabled"
 
 
 def test_prefix_action_dispatches_only_through_launcher_with_selected_paths():
