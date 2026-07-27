@@ -1,7 +1,7 @@
 # STATUS — EV4 Architect Stage QC
 
-Version: 1.1.0
-Status: prefix_repair_stage_routing_implemented_locally_validated_exact_head_ci_pending
+Version: 1.1.2
+Status: pcvp_architect_lock_refresh_locally_validated_live_ci_authoritative
 Last update: 2026-07-27
 
 ## Current Authority
@@ -14,12 +14,16 @@ base_branch: main
 last_functional_merge_commit: ecbf02e523a4619c98771a1240b3a05b238255b0
 runtime_interface_id: ev4-architect-quality-runtime@2.0.0
 compatibility_mode: authority_file_identity
-locked_architect_reference_commit: 60946aa40506692a17cd086a92866ad03adab21d
+locked_architect_reference_commit: 5a708db1eef580d6ad71e6c1272a93c3852e740d
 merged_baseline_status: merged
-current_feature: Validate Current Pipeline Prefix repair-stage routing
-current_feature_branch: feat/validate-current-pipeline-prefix
-current_feature_status: repair_implemented_locally_validated
-current_feature_exact_head_ci: pending
+current_feature: EV4-PCVP dormant Architect authority-lock refresh
+current_feature_branch: pcvp/v1-architect-lock-refresh
+current_feature_status: lock_regenerated_locally_validated
+current_feature_exact_head_ci: live_github_actions_current_pr_head
+exact_head_windows_workflow: live_github_actions_current_pr_head
+exact_head_ci_authority: live_github_actions_current_pr_head
+committed_current_head_ci_result: not_embedded
+fresh_exact_head_run_required_after_each_commit: true
 application_mode: local_windows_first_tkinter_gui
 production_deployment: not_applicable_local_tool
 release_performed: false
@@ -27,14 +31,62 @@ release_performed: false
 
 `last_functional_merge_commit` identifies the last merge that changed application or validation behavior. Documentation-only commits may advance `main` without changing this identity.
 
+## EV4-PCVP Dormant Architect Lock Refresh
+
+```yaml
+policy: EV4-PCVP@1.0.0
+bundle: EV4-PCVP-ACTIVE-BUNDLE@1.0.0
+architecture_lock_id: EV4-PCVP-ROLL-LOCK-20260727-R1
+stage_qc_work_unit_base: efd6aeef3625ada13a300f1b0653a37284c29556
+architect_dependency_pull_request: 43
+architect_dependency_head: 5a708db1eef580d6ad71e6c1272a93c3852e740d
+architect_dependency_tree: 051c73763510ad2ed7092535a66af26ce2803a25
+lock_generation: canonical_generator
+lock_schema_version: "4.0"
+compatibility_mode: authority_file_identity
+authority_inventory_delta:
+  added:
+    - scripts/architect_pcvp_producer.py
+  changed:
+    - manifests/architect-runtime-authority-manifest.v1.json
+    - scripts/architect_project_gate_exporter/contracts.py
+active_schema_delta: none
+dormant_policy_and_schema_resources_in_active_lock: false
+producer_emission_enabled: false
+caller_override_allowed: false
+adoption_status: not_yet_adopted
+activation_effect: NONE
+local_validation:
+  canonical_lock_check: success
+  compileall_src_tests: success
+  full_suite: 173_passed
+pull_request: 9
+pull_request_state_at_last_update: open_draft
+merge_performed: false
+```
+
+This refresh consumes the exact reviewed Architect feature Head. It adds no
+Stage-QC evaluator, does not reinterpret the dormant carrier, and does not make
+the non-authoritative PCVP Policy/profile/schema copies active Runtime data
+authority. Local evidence is not exact-Head GitHub Actions evidence and does not
+authorize Merge or activation. The authoritative current-Head CI result is read
+from the live `validate` workflow for whichever PR Head is current.
+
 ## Validate Current Pipeline Prefix
 
 ```yaml
 feature: Validate Current Pipeline Prefix
-implementation_state: implemented
+implementation_state: merged
 local_validation_state: locally_validated
-exact_head_ci_state: pending
-merge_state: not_merged
+exact_head_ci_state: validated_on_final_pr_head
+merge_state: merged
+pull_request: 8
+final_pr_head: e6f1e955d1ae07399fb9576e44aa51a4bcb5d7c4
+workflow: validate
+workflow_run_id: 30222888961
+run_number: 146
+workflow_conclusion: success
+merge_commit: efd6aeef3625ada13a300f1b0653a37284c29556
 architect_dependency_mutated: false
 prefix_context_version: 1.1.0
 accepted_prefix_lengths: 1_through_11_nonterminal_stages
@@ -57,7 +109,7 @@ Classifiable outcomes record evaluator-derived Stage Results and evaluator-retur
 
 Every Runtime-issued `blocking_issues[*].repair_stage` is validated. Null, malformed, unknown, out-of-prefix, or forward targets fail closed as `PREFIX_EVALUATION_UNCLASSIFIED`; no input, repair, or next-stage context is issued. Stage-QC does not call `apply_partial_rerun` or create a parallel Run State.
 
-Current local validation state after the repair:
+Final local and exact-Head validation state for merged PR #8:
 
 ```yaml
 compileall_src_tests: success
@@ -65,10 +117,10 @@ focused_prefix_tests: 38_passed
 focused_process_core_adapter_lock_regression: 158_passed
 full_suite: 173_passed
 canonical_lock_check: success
-exact_head_windows_workflow: pending
+exact_head_ci_state: validated_on_final_pr_head
 ```
 
-These local results are not exact-Head GitHub Actions evidence and do not authorize Merge.
+These local results remain local or historical. The exact-Head CI claim is bound only to the immutable final PR #8 identities recorded above.
 
 ## PR #4 Merge Evidence
 
@@ -91,7 +143,7 @@ PR #4 migrated Stage-QC to the official Architect Runtime interface v2 and compl
 lock_file: architect-authority.lock.json
 lock_schema_version: "4.0"
 repository: rezahh107/EV4-Architect-Repo
-reference_commit_sha: 60946aa40506692a17cd086a92866ad03adab21d
+reference_commit_sha: 5a708db1eef580d6ad71e6c1272a93c3852e740d
 runtime_interface_id: ev4-architect-quality-runtime@2.0.0
 compatibility_mode: authority_file_identity
 identity_algorithm: git_blob_oid_sha1
@@ -147,9 +199,41 @@ Stage-QC is a consumer and local validator. It must not copy the Runtime, create
 
 ## Exact-Head Windows CI Evidence
 
-PR #8 previously completed `validate` run `30219638832` successfully on exact Head `b9b27507cb54007ca0800c3cd0e686372231481c`. That evidence became stale when the repair changed the Head and is not evidence for the current repair.
+### Merged Prefix PR #8 — immutable evidence
 
-The evidence below belongs to the previously merged Runtime v2 consumer Head. It is also not evidence for the current prefix-validation repair.
+```yaml
+feature: Validate Current Pipeline Prefix
+pull_request: 8
+final_pr_head: e6f1e955d1ae07399fb9576e44aa51a4bcb5d7c4
+workflow: validate
+workflow_run_id: 30222888961
+run_number: 146
+workflow_conclusion: success
+merge_commit: efd6aeef3625ada13a300f1b0653a37284c29556
+evidence_class: immutable_historical_exact_head
+```
+
+This evidence is permanently bound to the final PR #8 Head, its successful workflow run, and its merge commit. Earlier PR #8 runs or Heads are not represented as final evidence.
+
+### Current PR #9 — live exact-Head authority
+
+```yaml
+pull_request: 9
+branch: pcvp/v1-architect-lock-refresh
+current_feature_exact_head_ci: live_github_actions_current_pr_head
+exact_head_windows_workflow: live_github_actions_current_pr_head
+exact_head_ci_authority: live_github_actions_current_pr_head
+committed_current_head_ci_result: not_embedded
+fresh_exact_head_run_required_after_each_commit: true
+```
+
+The current PR Head is mutable. `STATUS.md` therefore does not freeze a PASS or
+PENDING result for it. Current evidence must be obtained from the live GitHub
+Actions `validate` result whose commit identity exactly equals the current PR
+Head. A result for any prior Head is historical only and cannot authorize the
+resulting Head.
+
+### Previously merged Runtime v2 consumer — immutable evidence
 
 ```yaml
 workflow: validate
@@ -185,7 +269,7 @@ manual_architect_checkout_selection: available
 architect_connection_verification: available
 prefinal_stage_output_validation: available
 terminal_stage_output_validation: available
-current_pipeline_prefix_validation: repair_stage_routing_implemented_locally_validated_exact_head_ci_pending
+current_pipeline_prefix_validation: repair_stage_routing_merged_exact_head_validated
 fresh_process_isolation: enforced
 runtime_origin_reporting: enforced
 lock_manifest_inventory_check: enforced
@@ -241,6 +325,8 @@ Prefix validation additionally proves only that a compatible selected checkout e
 
 ## Next Step
 
-Obtain exact-Head Windows workflow evidence on the open focused pull request. Keep the pull request unmerged and unapproved, with auto-merge disabled, until repository review and the owner’s formal decision.
-
-Separately, `rezahh107/EV4-Architect-Repo` should evaluate provenance semantics through its own authority process. Any resulting Architect authority change requires a later, separate reviewed Stage-QC Lock-update PR; it must not be combined with this feature.
+For the resulting exact PR #9 Head, require the live Windows GitHub Actions
+`validate` workflow to complete successfully with that exact commit identity.
+After that exact-Head CI result, request a fresh PR Inspector review bound to the
+same Head. Keep Merge, approval, auto-merge, PCVP activation, deployment, and
+release unperformed pending that review and the owner’s later decision.
