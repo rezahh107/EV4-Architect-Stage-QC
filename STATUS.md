@@ -1,7 +1,7 @@
 # STATUS — EV4 Architect Stage QC
 
-Version: 1.1.2
-Status: pcvp_architect_lock_refresh_locally_validated_live_ci_authoritative
+Version: 1.1.3
+Status: architect_pr43_final_lock_reconciliation_pending_exact_head_ci
 Last update: 2026-07-27
 
 ## Current Authority
@@ -11,17 +11,18 @@ This file is the sole mutable authority for current Stage-QC project and validat
 ```yaml
 repository: rezahh107/EV4-Architect-Stage-QC
 base_branch: main
+repair_base_sha: 7a53655c6103f698e27d9c0f2073071f1423a506
 last_functional_merge_commit: ecbf02e523a4619c98771a1240b3a05b238255b0
 runtime_interface_id: ev4-architect-quality-runtime@2.0.0
 compatibility_mode: authority_file_identity
-locked_architect_reference_commit: 5a708db1eef580d6ad71e6c1272a93c3852e740d
+locked_architect_reference_commit: 1e61f4aa9485d98791780487eccdac5bb7fd4b2d
 merged_baseline_status: merged
-current_feature: EV4-PCVP dormant Architect authority-lock refresh
-current_feature_branch: pcvp/v1-architect-lock-refresh
-current_feature_status: lock_regenerated_locally_validated
-current_feature_exact_head_ci: live_github_actions_current_pr_head
-exact_head_windows_workflow: live_github_actions_current_pr_head
-exact_head_ci_authority: live_github_actions_current_pr_head
+current_feature: Architect PR 43 final authority Lock reconciliation
+current_feature_branch: fix/reconcile-architect-lock-pr43-final
+current_feature_status: lock_updated_pending_exact_head_ci
+current_feature_exact_head_ci: live_github_actions_current_branch_head
+exact_head_windows_workflow: live_github_actions_current_branch_head
+exact_head_ci_authority: live_github_actions_current_branch_head
 committed_current_head_ci_result: not_embedded
 fresh_exact_head_run_required_after_each_commit: true
 application_mode: local_windows_first_tkinter_gui
@@ -29,9 +30,43 @@ production_deployment: not_applicable_local_tool
 release_performed: false
 ```
 
-`last_functional_merge_commit` identifies the last merge that changed application or validation behavior. Documentation-only commits may advance `main` without changing this identity.
+`last_functional_merge_commit` identifies the last merge recorded here as changing application or validation behavior. The current repair changes only the dependency Lock and status evidence; it does not change verifier, Runtime, Pipeline, or GUI behavior.
 
-## EV4-PCVP Dormant Architect Lock Refresh
+## Architect PR #43 Final-Merge Lock Reconciliation
+
+```yaml
+resolution_class: STAGE_QC_LOCK_REFRESH_REQUIRED
+stage_qc_base_sha: 7a53655c6103f698e27d9c0f2073071f1423a506
+architect_pull_request: 43
+architect_initial_lock_generation_head: 5a708db1eef580d6ad71e6c1272a93c3852e740d
+architect_final_pr_head: a74bf709b93bcc08bc6969a0a34002ff529d16f0
+architect_merge_commit: 1e61f4aa9485d98791780487eccdac5bb7fd4b2d
+architect_current_main_observed: 9c1a8b47ac263a217737badb4e1065be8af8fce2
+stale_expected_manifest_blob_oid: 33f45133abfcf9304a972d5229fae8bdb1c2b35d
+final_manifest_blob_oid: 28ad5317aa3223778508a16d7c18e7cc3b89c9a1
+stale_contracts_blob_oid: 4920cf0cca36d4d39e5434f7562a13dddbf9ecc9
+final_contracts_blob_oid: 097d971afa4ee106a9876da2752e576e6e7ddefc
+runtime_interface_id: ev4-architect-quality-runtime@2.0.0
+authority_inventory_delta:
+  removed:
+    - scripts/architect_pcvp_producer.py
+  changed:
+    - manifests/architect-runtime-authority-manifest.v1.json
+    - scripts/architect_project_gate_exporter/contracts.py
+repository_behavior_change: none
+fail_closed_behavior_preserved: true
+fresh_process_boundary_preserved: true
+local_selected_checkout_state: not_observed_by_repository_repair
+local_validation: not_run_environment_unavailable
+exact_head_ci: pending_live_workflow
+merge_performed: false
+```
+
+Stage-QC PR #9 generated and validated its Lock against the then-reviewed Architect commit `5a708db1eef580d6ad71e6c1272a93c3852e740d` and merged before Architect PR #43 reached its final Head. Architect PR #43 subsequently established structural dormancy by removing `scripts/architect_pcvp_producer.py` from the active Runtime Authority Manifest and changing the active Project Gate exporter contracts module before merging as `1e61f4aa9485d98791780487eccdac5bb7fd4b2d`.
+
+The resulting Stage-QC Lock was therefore canonical for the intermediate Architect authority closure but stale for the reviewed final merge. The existing verifier correctly rejected the final committed Manifest blob before Runtime import. This repair reconciles the Lock with the final merged authority inventory and does not weaken or bypass compatibility checks.
+
+## Historical EV4-PCVP Initial Architect Lock Refresh
 
 ```yaml
 policy: EV4-PCVP@1.0.0
@@ -39,12 +74,12 @@ bundle: EV4-PCVP-ACTIVE-BUNDLE@1.0.0
 architecture_lock_id: EV4-PCVP-ROLL-LOCK-20260727-R1
 stage_qc_work_unit_base: efd6aeef3625ada13a300f1b0653a37284c29556
 architect_dependency_pull_request: 43
-architect_dependency_head: 5a708db1eef580d6ad71e6c1272a93c3852e740d
-architect_dependency_tree: 051c73763510ad2ed7092535a66af26ce2803a25
+architect_dependency_intermediate_head: 5a708db1eef580d6ad71e6c1272a93c3852e740d
+architect_dependency_intermediate_tree: 051c73763510ad2ed7092535a66af26ce2803a25
 lock_generation: canonical_generator
 lock_schema_version: "4.0"
 compatibility_mode: authority_file_identity
-authority_inventory_delta:
+historical_authority_inventory_delta:
   added:
     - scripts/architect_pcvp_producer.py
   changed:
@@ -56,21 +91,17 @@ producer_emission_enabled: false
 caller_override_allowed: false
 adoption_status: not_yet_adopted
 activation_effect: NONE
-local_validation:
+historical_local_validation:
   canonical_lock_check: success
   compileall_src_tests: success
   full_suite: 173_passed
 pull_request: 9
-pull_request_state_at_last_update: open_draft
-merge_performed: false
+pull_request_state: merged
+merge_commit: 7a53655c6103f698e27d9c0f2073071f1423a506
+superseded_by_final_pr43_lock_reconciliation: true
 ```
 
-This refresh consumes the exact reviewed Architect feature Head. It adds no
-Stage-QC evaluator, does not reinterpret the dormant carrier, and does not make
-the non-authoritative PCVP Policy/profile/schema copies active Runtime data
-authority. Local evidence is not exact-Head GitHub Actions evidence and does not
-authorize Merge or activation. The authoritative current-Head CI result is read
-from the live `validate` workflow for whichever PR Head is current.
+This section records the evidence for the initial PR #9 refresh only. Those results remain valid for the intermediate Architect Head against which they ran, but they do not establish compatibility with the later final PR #43 authority closure.
 
 ## Validate Current Pipeline Prefix
 
@@ -143,7 +174,7 @@ PR #4 migrated Stage-QC to the official Architect Runtime interface v2 and compl
 lock_file: architect-authority.lock.json
 lock_schema_version: "4.0"
 repository: rezahh107/EV4-Architect-Repo
-reference_commit_sha: 5a708db1eef580d6ad71e6c1272a93c3852e740d
+reference_commit_sha: 1e61f4aa9485d98791780487eccdac5bb7fd4b2d
 runtime_interface_id: ev4-architect-quality-runtime@2.0.0
 compatibility_mode: authority_file_identity
 identity_algorithm: git_blob_oid_sha1
@@ -215,23 +246,34 @@ evidence_class: immutable_historical_exact_head
 
 This evidence is permanently bound to the final PR #8 Head, its successful workflow run, and its merge commit. Earlier PR #8 runs or Heads are not represented as final evidence.
 
-### Current PR #9 — live exact-Head authority
+### Merged Initial Lock PR #9 — immutable intermediate-pair evidence
 
 ```yaml
 pull_request: 9
-branch: pcvp/v1-architect-lock-refresh
-current_feature_exact_head_ci: live_github_actions_current_pr_head
-exact_head_windows_workflow: live_github_actions_current_pr_head
-exact_head_ci_authority: live_github_actions_current_pr_head
+final_pr_head: 0afc103baf7c6554e997d2f5e459963f27e47798
+merge_commit: 7a53655c6103f698e27d9c0f2073071f1423a506
+architect_reference_head: 5a708db1eef580d6ad71e6c1272a93c3852e740d
+workflow: validate
+workflow_run_id: 30254671042
+run_number: 148
+workflow_conclusion: success
+evidence_class: immutable_historical_intermediate_pair
+```
+
+This evidence proves the initial Lock was canonical for the intermediate Architect authority closure. It does not prove compatibility with the final PR #43 Head or merge commit.
+
+### Current reconciliation branch — live exact-Head authority
+
+```yaml
+branch: fix/reconcile-architect-lock-pr43-final
+current_feature_exact_head_ci: live_github_actions_current_branch_head
+exact_head_windows_workflow: live_github_actions_current_branch_head
+exact_head_ci_authority: live_github_actions_current_branch_head
 committed_current_head_ci_result: not_embedded
 fresh_exact_head_run_required_after_each_commit: true
 ```
 
-The current PR Head is mutable. `STATUS.md` therefore does not freeze a PASS or
-PENDING result for it. Current evidence must be obtained from the live GitHub
-Actions `validate` result whose commit identity exactly equals the current PR
-Head. A result for any prior Head is historical only and cannot authorize the
-resulting Head.
+The branch Head is mutable. Current evidence must be obtained from the live GitHub Actions `validate` result whose commit identity exactly equals the current branch or PR Head. A result for any prior Head is historical only.
 
 ### Previously merged Runtime v2 consumer — immutable evidence
 
@@ -325,8 +367,4 @@ Prefix validation additionally proves only that a compatible selected checkout e
 
 ## Next Step
 
-For the resulting exact PR #9 Head, require the live Windows GitHub Actions
-`validate` workflow to complete successfully with that exact commit identity.
-After that exact-Head CI result, request a fresh PR Inspector review bound to the
-same Head. Keep Merge, approval, auto-merge, PCVP activation, deployment, and
-release unperformed pending that review and the owner’s later decision.
+Require the live Windows GitHub Actions `validate` workflow to complete successfully on the exact reconciliation branch or PR Head. Then request a fresh review bound to that same Head. Keep Merge, approval, auto-merge, PCVP activation, deployment, and release unperformed pending that review and the owner’s later decision.
