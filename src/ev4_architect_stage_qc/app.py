@@ -363,6 +363,8 @@ class Application:
     def _start(self, kind, function, args):
         if self.active:
             return
+        self.last_attempt = None
+        self.open_button.configure(state="disabled")
         self.active = True
         self._active_input_signature = self._input_signature()
         self._set_actions("disabled")
