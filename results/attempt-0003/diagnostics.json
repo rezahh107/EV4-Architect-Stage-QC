@@ -1,0 +1,1 @@
+{"code":"ARCHITECT_CONNECTION_INVALID","next_action":"Select a compatible local Architect repository.","reason":"Authority lock mismatch for committed blob: manifests/architect-runtime-authority-manifest.v1.json"}

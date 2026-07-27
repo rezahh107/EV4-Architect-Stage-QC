@@ -1,0 +1,2 @@
+ARCHITECT_CONNECTION_INVALID: Authority lock mismatch for committed blob: manifests/architect-runtime-authority-manifest.v1.json
+Next action: Select a compatible local Architect repository.
