@@ -1,7 +1,7 @@
 # STATUS — EV4 Architect Stage QC
 
-Version: 1.2.0
-Status: lightweight_operation_status_implemented_pending_exact_head_ci
+Version: 1.2.1
+Status: lightweight_operation_status_stale_result_repair_implemented_pending_exact_head_ci
 Last update: 2026-07-27
 
 ## Current Authority
@@ -19,7 +19,7 @@ locked_architect_reference_commit: 1e61f4aa9485d98791780487eccdac5bb7fd4b2d
 merged_baseline_status: merged
 current_feature: Lightweight operational status presentation
 current_feature_branch: feat/lightweight-operation-status
-current_feature_status: implemented_focused_headless_tests_passed
+current_feature_status: stale_result_start_boundary_repair_implemented_19_focused_tests_passed
 current_feature_exact_head_ci: live_github_actions_current_branch_head
 exact_head_windows_workflow: live_github_actions_current_branch_head
 exact_head_ci_authority: live_github_actions_current_branch_head
@@ -61,6 +61,11 @@ stale_status_invalidation:
   stage_output_folder_change: enforced
   export_request_json_change: enforced
   operation_start_replaces_prior_result: enforced
+result_folder_capability:
+  operation_start_clears_previous_attempt: enforced
+  operation_start_disables_open_result: enforced
+  connection_completion_publishes_attempt: false
+  validation_completion_publishes_current_attempt_only: enforced
 input_editing_while_operation_runs: disabled
 external_ui_dependencies_added: false
 architect_authority_lock_changed: false
@@ -69,7 +74,7 @@ validation_contract_changed: false
 fresh_process_boundary_changed: false
 local_reconstructed_workspace_validation:
   compileall_src_tests: success
-  focused_status_tests: 14_passed
+  focused_status_tests: 19_passed
   process_isolation_regressions: not_run_in_reconstructed_workspace
   full_suite: not_run_in_reconstructed_workspace
 graphical_manual_check: not_run_no_graphical_session
@@ -77,7 +82,7 @@ exact_head_windows_ci: pending_live_workflow
 merge_performed: false
 ```
 
-The status area reuses one compact location for the latest operation. Green is emitted only from an existing successful `ConnectionResult` or `CoreResult`; known failures and unexpected application errors remain red and retain exact technical evidence under the collapsed details control. Input changes return the presentation to a neutral not-checked state rather than leaving stale success visible.
+The status area reuses one compact location for the latest operation. Green is emitted only from an existing successful `ConnectionResult` or `CoreResult`; known failures and unexpected application errors remain red and retain exact technical evidence under the collapsed details control. Input changes return the presentation to a neutral not-checked state rather than leaving stale success visible. Every accepted operation start also clears the previous `last_attempt` and disables **Open Result Folder** before processing-state publication or worker construction; only completion of the current validation may publish a new attempt path.
 
 ## Architect PR #43 Final-Merge Lock Reconciliation
 
@@ -385,6 +390,7 @@ attempt_diagnostics: retained
 latest_operation_status_light: implemented_on_current_feature_branch
 status_color_plus_symbol_plus_text: implemented_on_current_feature_branch
 stale_status_invalidation: implemented_on_current_feature_branch
+stale_result_folder_start_boundary: repaired_on_current_feature_branch
 collapsed_technical_details: implemented_on_current_feature_branch
 ```
 
