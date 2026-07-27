@@ -1,7 +1,7 @@
 # STATUS — EV4 Architect Stage QC
 
-Version: 1.1.0
-Status: prefix_repair_stage_routing_implemented_locally_validated_exact_head_ci_pending
+Version: 1.1.1
+Status: pcvp_architect_lock_refresh_locally_validated_exact_head_ci_pending
 Last update: 2026-07-27
 
 ## Current Authority
@@ -14,11 +14,11 @@ base_branch: main
 last_functional_merge_commit: ecbf02e523a4619c98771a1240b3a05b238255b0
 runtime_interface_id: ev4-architect-quality-runtime@2.0.0
 compatibility_mode: authority_file_identity
-locked_architect_reference_commit: 60946aa40506692a17cd086a92866ad03adab21d
+locked_architect_reference_commit: 5a708db1eef580d6ad71e6c1272a93c3852e740d
 merged_baseline_status: merged
-current_feature: Validate Current Pipeline Prefix repair-stage routing
-current_feature_branch: feat/validate-current-pipeline-prefix
-current_feature_status: repair_implemented_locally_validated
+current_feature: EV4-PCVP dormant Architect authority-lock refresh
+current_feature_branch: pcvp/v1-architect-lock-refresh
+current_feature_status: lock_regenerated_locally_validated
 current_feature_exact_head_ci: pending
 application_mode: local_windows_first_tkinter_gui
 production_deployment: not_applicable_local_tool
@@ -26,6 +26,45 @@ release_performed: false
 ```
 
 `last_functional_merge_commit` identifies the last merge that changed application or validation behavior. Documentation-only commits may advance `main` without changing this identity.
+
+## EV4-PCVP Dormant Architect Lock Refresh
+
+```yaml
+policy: EV4-PCVP@1.0.0
+bundle: EV4-PCVP-ACTIVE-BUNDLE@1.0.0
+architecture_lock_id: EV4-PCVP-ROLL-LOCK-20260727-R1
+stage_qc_work_unit_base: efd6aeef3625ada13a300f1b0653a37284c29556
+architect_dependency_pull_request: 43
+architect_dependency_head: 5a708db1eef580d6ad71e6c1272a93c3852e740d
+architect_dependency_tree: 051c73763510ad2ed7092535a66af26ce2803a25
+lock_generation: canonical_generator
+lock_schema_version: "4.0"
+compatibility_mode: authority_file_identity
+authority_inventory_delta:
+  added:
+    - scripts/architect_pcvp_producer.py
+  changed:
+    - manifests/architect-runtime-authority-manifest.v1.json
+    - scripts/architect_project_gate_exporter/contracts.py
+active_schema_delta: none
+dormant_policy_and_schema_resources_in_active_lock: false
+producer_emission_enabled: false
+caller_override_allowed: false
+adoption_status: not_yet_adopted
+activation_effect: NONE
+local_validation:
+  canonical_lock_check: success
+  compileall_src_tests: success
+  full_suite: 173_passed
+exact_head_windows_workflow: pending
+merge_state: not_merged
+```
+
+This refresh consumes the exact reviewed Architect feature Head. It adds no
+Stage-QC evaluator, does not reinterpret the dormant carrier, and does not make
+the non-authoritative PCVP Policy/profile/schema copies active Runtime data
+authority. Local evidence is not exact-Head GitHub Actions evidence and does not
+authorize Merge or activation.
 
 ## Validate Current Pipeline Prefix
 
@@ -91,7 +130,7 @@ PR #4 migrated Stage-QC to the official Architect Runtime interface v2 and compl
 lock_file: architect-authority.lock.json
 lock_schema_version: "4.0"
 repository: rezahh107/EV4-Architect-Repo
-reference_commit_sha: 60946aa40506692a17cd086a92866ad03adab21d
+reference_commit_sha: 5a708db1eef580d6ad71e6c1272a93c3852e740d
 runtime_interface_id: ev4-architect-quality-runtime@2.0.0
 compatibility_mode: authority_file_identity
 identity_algorithm: git_blob_oid_sha1
