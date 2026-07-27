@@ -1,8 +1,8 @@
 # STATUS — EV4 Architect Stage QC
 
-Version: 1.2.1
-Status: lightweight_operation_status_stale_result_repair_implemented_pending_exact_head_ci
-Last update: 2026-07-27
+Version: 1.3.0
+Status: three_section_vertical_ui_layout_implemented_pending_exact_head_ci
+Last update: 2026-07-28
 
 ## Current Authority
 
@@ -11,18 +11,18 @@ This file is the sole mutable authority for current Stage-QC project and validat
 ```yaml
 repository: rezahh107/EV4-Architect-Stage-QC
 base_branch: main
-feature_base_sha: 0e8ee3cbd5b184a04e307fb39914b348300fd36b
-last_functional_merge_commit: ecbf02e523a4619c98771a1240b3a05b238255b0
+feature_base_sha: 4cba55c31ad5eaba57d5e6037e6f05e77a968bab
+last_functional_merge_commit: 4cba55c31ad5eaba57d5e6037e6f05e77a968bab
 runtime_interface_id: ev4-architect-quality-runtime@2.0.0
 compatibility_mode: authority_file_identity
 locked_architect_reference_commit: 1e61f4aa9485d98791780487eccdac5bb7fd4b2d
 merged_baseline_status: merged
-current_feature: Lightweight operational status presentation
-current_feature_branch: feat/lightweight-operation-status
-current_feature_status: stale_result_start_boundary_repair_implemented_19_focused_tests_passed
-current_feature_exact_head_ci: live_github_actions_current_branch_head
-exact_head_windows_workflow: live_github_actions_current_branch_head
-exact_head_ci_authority: live_github_actions_current_branch_head
+current_feature: Three-section vertical UI layout
+current_feature_branch: feat/reorganize-stage-qc-layout
+current_feature_status: implemented_24_isolated_ui_tests_passed
+current_feature_exact_head_ci: live_github_actions_current_pr_head
+exact_head_windows_workflow: live_github_actions_current_pr_head
+exact_head_ci_authority: live_github_actions_current_pr_head
 committed_current_head_ci_result: not_embedded
 fresh_exact_head_run_required_after_each_commit: true
 application_mode: local_windows_first_tkinter_gui
@@ -30,12 +30,50 @@ production_deployment: not_applicable_local_tool
 release_performed: false
 ```
 
-`last_functional_merge_commit` identifies the last merge recorded here as changing application or validation behavior. The current feature changes only Tkinter presentation and UI-state invalidation. It does not change the Architect Lock, Runtime, Pipeline, validation semantics, or fresh-process boundary.
+`last_functional_merge_commit` identifies the latest merged application/UI behavior baseline. The current feature changes only Tkinter layout hierarchy, responsive geometry, and layout-focused tests. It does not change the Architect Lock, Runtime, Pipeline, validation semantics, result classification, or fresh-process boundary.
 
-## Lightweight Operational Status Presentation
+## Three-Section Vertical UI Layout
 
 ```yaml
-implementation_target: implementation_ready
+feature: three_section_vertical_ui_layout
+implementation_state: implemented
+layout:
+  - architect_connection
+  - validation
+  - latest_result
+result_section_after_all_validation_controls: true
+open_result_folder_moved_into_result_section: true
+details_remain_inside_result_section: true
+pipeline_and_final_validation_share_validation_section: true
+header_subtitle_added: true
+responsive_grid_weights: implemented
+runtime_behavior_changed: false
+validation_semantics_changed: false
+architect_lock_changed: false
+workflow_changed: false
+new_dependency_added: false
+local_validation:
+  compileall: success_in_isolated_ui_harness
+  focused_ui_tests: 24_passed_in_isolated_ui_harness
+  full_suite: not_run_no_full_checkout
+  canonical_lock_check: not_run_no_selected_architect_checkout
+graphical_manual_check: not_run_no_graphical_session
+exact_head_ci: live_github_actions_current_pr_head
+merge_performed: false
+```
+
+The UI now presents one vertical workflow: select and verify the Architect checkout, run Pipeline or Final Validation, then inspect the latest result. The existing status state machine, stale-result invalidation, current-attempt capability, command bindings, queue polling, fresh-process dispatch, and technical evidence remain unchanged. The local result above is from an isolated headless UI harness reconstructed from exact GitHub blobs; it is not a substitute for the repository workflow or a graphical Windows smoke check.
+
+## Merged Lightweight Operational Status Presentation
+
+```yaml
+implementation_target: merged
+pull_request: 11
+final_pr_head: 54498f1b9721ed218be0e266b4aa7a620aa84d83
+merge_commit: 4cba55c31ad5eaba57d5e6037e6f05e77a968bab
+workflow_run_id: 30299905534
+workflow_run_number: 150
+workflow_conclusion: success
 applicable_profiles:
   - UXIS-Core
   - UXIS-File-App
@@ -78,8 +116,8 @@ local_reconstructed_workspace_validation:
   process_isolation_regressions: not_run_in_reconstructed_workspace
   full_suite: not_run_in_reconstructed_workspace
 graphical_manual_check: not_run_no_graphical_session
-exact_head_windows_ci: pending_live_workflow
-merge_performed: false
+exact_head_windows_ci: validated_on_final_pr_head
+merge_performed: true
 ```
 
 The status area reuses one compact location for the latest operation. Green is emitted only from an existing successful `ConnectionResult` or `CoreResult`; known failures and unexpected application errors remain red and retain exact technical evidence under the collapsed details control. Input changes return the presentation to a neutral not-checked state rather than leaving stale success visible. Every accepted operation start also clears the previous `last_attempt` and disables **Open Result Folder** before processing-state publication or worker construction; only completion of the current validation may publish a new attempt path.
@@ -330,10 +368,28 @@ evidence_class: immutable_historical_exact_pair
 
 This evidence is bound to the final PR #10 Head and the Lock-selected Architect authority closure. It remains historical evidence and does not validate later application changes.
 
-### Current lightweight status branch — live exact-Head authority
+### Merged lightweight status PR #11 — immutable evidence
 
 ```yaml
-branch: feat/lightweight-operation-status
+pull_request: 11
+final_pr_head: 54498f1b9721ed218be0e266b4aa7a620aa84d83
+merge_commit: 4cba55c31ad5eaba57d5e6037e6f05e77a968bab
+workflow: validate
+workflow_run_id: 30299905534
+run_number: 150
+workflow_conclusion: success
+architect_reference_head: 1e61f4aa9485d98791780487eccdac5bb7fd4b2d
+focused_cross_repository_suite: 169_passed
+full_stage_qc_suite: 184_passed
+evidence_class: immutable_historical_exact_head
+```
+
+This evidence is bound to the final PR #11 Head and its successful Windows workflow. It does not validate later layout changes.
+
+### Current three-section layout branch — live exact-Head authority
+
+```yaml
+branch: feat/reorganize-stage-qc-layout
 current_feature_exact_head_ci: live_github_actions_current_pr_head
 exact_head_windows_workflow: live_github_actions_current_pr_head
 exact_head_ci_authority: live_github_actions_current_pr_head
@@ -387,11 +443,14 @@ committed_blob_identity_check: enforced
 working_tree_byte_identity_check: enforced
 strict_json_input: enforced
 attempt_diagnostics: retained
-latest_operation_status_light: implemented_on_current_feature_branch
-status_color_plus_symbol_plus_text: implemented_on_current_feature_branch
-stale_status_invalidation: implemented_on_current_feature_branch
-stale_result_folder_start_boundary: repaired_on_current_feature_branch
-collapsed_technical_details: implemented_on_current_feature_branch
+latest_operation_status_light: merged_exact_head_validated
+status_color_plus_symbol_plus_text: merged_exact_head_validated
+stale_status_invalidation: merged_exact_head_validated
+stale_result_folder_start_boundary: merged_exact_head_validated
+collapsed_technical_details: merged_exact_head_validated
+three_section_vertical_layout: implemented_on_current_feature_branch
+latest_result_after_all_validation_controls: implemented_on_current_feature_branch
+result_actions_grouped_in_latest_result: implemented_on_current_feature_branch
 ```
 
 The tool validates local Stage Output workflows. It does not perform interactive Elementor execution, CE acceptance, Builder execution, Responsive QA, deployment, or production release.
@@ -440,4 +499,4 @@ Prefix validation additionally proves only that a compatible selected checkout e
 
 ## Next Step
 
-Require the live Windows GitHub Actions `validate` workflow to complete successfully on the exact `feat/lightweight-operation-status` PR Head. Then perform a Windows GUI smoke check for neutral, processing, green success, red failure, input invalidation, details toggle, resizing, and keyboard focus. Keep Merge, approval, auto-merge, deployment, and release unperformed pending fresh review and the owner’s later decision.
+Require the live Windows GitHub Actions `validate` workflow to complete successfully on the exact `feat/reorganize-stage-qc-layout` PR Head. Then perform a Windows GUI smoke check for initial, processing, success, failure, internal-error, expanded-details, collapsed-details, minimum-size, moderately-wide, narrow-supported, 100% scaling, 125% scaling, resizing, and keyboard traversal. Keep Merge, approval, auto-merge, deployment, and release unperformed pending fresh review and the owner’s later decision.
