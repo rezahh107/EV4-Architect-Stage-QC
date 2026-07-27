@@ -1,7 +1,7 @@
 # STATUS — EV4 Architect Stage QC
 
-Version: 1.1.3
-Status: architect_pr43_final_lock_reconciliation_pending_exact_head_ci
+Version: 1.2.0
+Status: lightweight_operation_status_implemented_pending_exact_head_ci
 Last update: 2026-07-27
 
 ## Current Authority
@@ -11,15 +11,15 @@ This file is the sole mutable authority for current Stage-QC project and validat
 ```yaml
 repository: rezahh107/EV4-Architect-Stage-QC
 base_branch: main
-repair_base_sha: 7a53655c6103f698e27d9c0f2073071f1423a506
+feature_base_sha: 0e8ee3cbd5b184a04e307fb39914b348300fd36b
 last_functional_merge_commit: ecbf02e523a4619c98771a1240b3a05b238255b0
 runtime_interface_id: ev4-architect-quality-runtime@2.0.0
 compatibility_mode: authority_file_identity
 locked_architect_reference_commit: 1e61f4aa9485d98791780487eccdac5bb7fd4b2d
 merged_baseline_status: merged
-current_feature: Architect PR 43 final authority Lock reconciliation
-current_feature_branch: fix/reconcile-architect-lock-pr43-final
-current_feature_status: lock_updated_pending_exact_head_ci
+current_feature: Lightweight operational status presentation
+current_feature_branch: feat/lightweight-operation-status
+current_feature_status: implemented_focused_headless_tests_passed
 current_feature_exact_head_ci: live_github_actions_current_branch_head
 exact_head_windows_workflow: live_github_actions_current_branch_head
 exact_head_ci_authority: live_github_actions_current_branch_head
@@ -30,7 +30,54 @@ production_deployment: not_applicable_local_tool
 release_performed: false
 ```
 
-`last_functional_merge_commit` identifies the last merge recorded here as changing application or validation behavior. The current repair changes only the dependency Lock and status evidence; it does not change verifier, Runtime, Pipeline, or GUI behavior.
+`last_functional_merge_commit` identifies the last merge recorded here as changing application or validation behavior. The current feature changes only Tkinter presentation and UI-state invalidation. It does not change the Architect Lock, Runtime, Pipeline, validation semantics, or fresh-process boundary.
+
+## Lightweight Operational Status Presentation
+
+```yaml
+implementation_target: implementation_ready
+applicable_profiles:
+  - UXIS-Core
+  - UXIS-File-App
+  - UXIS-Desktop-Python
+  - DMDS-Core
+  - DMDS-Desktop-Python
+  - DMDS-UXIS-Bridge
+status_states:
+  - not_run
+  - processing
+  - passed
+  - failed
+  - warning
+  - internal_error
+status_communication: color_plus_symbol_plus_text
+status_light_implementation: native_tkinter_canvas_circle
+success_requires_existing_result_success: true
+failure_preserves_existing_result_classification: true
+plain_language_message_and_next_action: true
+technical_details_collapsed_by_default: true
+stale_status_invalidation:
+  architect_repository_change: enforced
+  stage_output_folder_change: enforced
+  export_request_json_change: enforced
+  operation_start_replaces_prior_result: enforced
+input_editing_while_operation_runs: disabled
+external_ui_dependencies_added: false
+architect_authority_lock_changed: false
+runtime_or_pipeline_behavior_changed: false
+validation_contract_changed: false
+fresh_process_boundary_changed: false
+local_reconstructed_workspace_validation:
+  compileall_src_tests: success
+  focused_status_tests: 14_passed
+  process_isolation_regressions: not_run_in_reconstructed_workspace
+  full_suite: not_run_in_reconstructed_workspace
+graphical_manual_check: not_run_no_graphical_session
+exact_head_windows_ci: pending_live_workflow
+merge_performed: false
+```
+
+The status area reuses one compact location for the latest operation. Green is emitted only from an existing successful `ConnectionResult` or `CoreResult`; known failures and unexpected application errors remain red and retain exact technical evidence under the collapsed details control. Input changes return the presentation to a neutral not-checked state rather than leaving stale success visible.
 
 ## Architect PR #43 Final-Merge Lock Reconciliation
 
@@ -262,18 +309,34 @@ evidence_class: immutable_historical_intermediate_pair
 
 This evidence proves the initial Lock was canonical for the intermediate Architect authority closure. It does not prove compatibility with the final PR #43 Head or merge commit.
 
-### Current reconciliation branch — live exact-Head authority
+### Merged final Lock reconciliation PR #10 — immutable evidence
 
 ```yaml
-branch: fix/reconcile-architect-lock-pr43-final
-current_feature_exact_head_ci: live_github_actions_current_branch_head
-exact_head_windows_workflow: live_github_actions_current_branch_head
-exact_head_ci_authority: live_github_actions_current_branch_head
+pull_request: 10
+final_pr_head: dcfc115cf2bae9770c2526469eea1346c5175c92
+merge_commit: 849fbff5372e9de5273669a26402de44d4bdb90f
+workflow: validate
+workflow_run_id: 30294970496
+run_number: 149
+workflow_conclusion: success
+architect_reference_head: 1e61f4aa9485d98791780487eccdac5bb7fd4b2d
+evidence_class: immutable_historical_exact_pair
+```
+
+This evidence is bound to the final PR #10 Head and the Lock-selected Architect authority closure. It remains historical evidence and does not validate later application changes.
+
+### Current lightweight status branch — live exact-Head authority
+
+```yaml
+branch: feat/lightweight-operation-status
+current_feature_exact_head_ci: live_github_actions_current_pr_head
+exact_head_windows_workflow: live_github_actions_current_pr_head
+exact_head_ci_authority: live_github_actions_current_pr_head
 committed_current_head_ci_result: not_embedded
 fresh_exact_head_run_required_after_each_commit: true
 ```
 
-The branch Head is mutable. Current evidence must be obtained from the live GitHub Actions `validate` result whose commit identity exactly equals the current branch or PR Head. A result for any prior Head is historical only.
+The branch Head is mutable. Current evidence must be obtained from the live GitHub Actions `validate` result whose commit identity exactly equals the current PR Head. A result for any prior Head is historical only.
 
 ### Previously merged Runtime v2 consumer — immutable evidence
 
@@ -319,6 +382,10 @@ committed_blob_identity_check: enforced
 working_tree_byte_identity_check: enforced
 strict_json_input: enforced
 attempt_diagnostics: retained
+latest_operation_status_light: implemented_on_current_feature_branch
+status_color_plus_symbol_plus_text: implemented_on_current_feature_branch
+stale_status_invalidation: implemented_on_current_feature_branch
+collapsed_technical_details: implemented_on_current_feature_branch
 ```
 
 The tool validates local Stage Output workflows. It does not perform interactive Elementor execution, CE acceptance, Builder execution, Responsive QA, deployment, or production release.
@@ -367,4 +434,4 @@ Prefix validation additionally proves only that a compatible selected checkout e
 
 ## Next Step
 
-Require the live Windows GitHub Actions `validate` workflow to complete successfully on the exact reconciliation branch or PR Head. Then request a fresh review bound to that same Head. Keep Merge, approval, auto-merge, PCVP activation, deployment, and release unperformed pending that review and the owner’s later decision.
+Require the live Windows GitHub Actions `validate` workflow to complete successfully on the exact `feat/lightweight-operation-status` PR Head. Then perform a Windows GUI smoke check for neutral, processing, green success, red failure, input invalidation, details toggle, resizing, and keyboard focus. Keep Merge, approval, auto-merge, deployment, and release unperformed pending fresh review and the owner’s later decision.
