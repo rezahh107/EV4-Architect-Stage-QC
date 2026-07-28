@@ -1,7 +1,7 @@
 # STATUS — EV4 Architect Stage QC
 
-Version: 1.3.0
-Status: three_section_vertical_ui_layout_implemented_pending_exact_head_ci
+Version: 1.3.1
+Status: pr11_canonical_exact_head_evidence_repaired_pending_exact_head_ci
 Last update: 2026-07-28
 
 ## Current Authority
@@ -71,9 +71,8 @@ implementation_target: merged
 pull_request: 11
 final_pr_head: 54498f1b9721ed218be0e266b4aa7a620aa84d83
 merge_commit: 4cba55c31ad5eaba57d5e6037e6f05e77a968bab
-workflow_run_id: 30299905534
-workflow_run_number: 150
-workflow_conclusion: success
+historical_exact_head_evidence_ref: EVIDENCE-STAGEQC-PR11-FINAL-HEAD-VALIDATE
+exact_head_windows_ci: validated_by_referenced_immutable_evidence
 applicable_profiles:
   - UXIS-Core
   - UXIS-File-App
@@ -368,23 +367,27 @@ evidence_class: immutable_historical_exact_pair
 
 This evidence is bound to the final PR #10 Head and the Lock-selected Architect authority closure. It remains historical evidence and does not validate later application changes.
 
-### Merged lightweight status PR #11 — immutable evidence
+### Merged lightweight status PR #11 — canonical immutable evidence
 
 ```yaml
+evidence_id: EVIDENCE-STAGEQC-PR11-FINAL-HEAD-VALIDATE
 pull_request: 11
 final_pr_head: 54498f1b9721ed218be0e266b4aa7a620aa84d83
 merge_commit: 4cba55c31ad5eaba57d5e6037e6f05e77a968bab
 workflow: validate
-workflow_run_id: 30299905534
-run_number: 150
+workflow_run_id: 30307975893
+run_number: 153
 workflow_conclusion: success
 architect_reference_head: 1e61f4aa9485d98791780487eccdac5bb7fd4b2d
-focused_cross_repository_suite: 169_passed
-full_stage_qc_suite: 184_passed
+focused_cross_repository_suite: 174_passed
+full_stage_qc_suite: 189_passed
+authority_verification_artifact_digest: sha256:3388940adba8aad99308c1578bcac45a854664b6538709476f98f629811fc770
+cross_repository_artifact_digest: sha256:02b0b5871619aca688b4fb1318f80cbecede4e12929b56c56349a2668d39aa43
+full_tests_artifact_digest: sha256:b533e6f7d005483c227dc7817e99af8a7bce1a0caf9c9fdea1046a219840c653
 evidence_class: immutable_historical_exact_head
 ```
 
-This evidence is bound to the final PR #11 Head and its successful Windows workflow. It does not validate later layout changes.
+This is the single canonical `STATUS.md` record for the final PR #11 Head and its successful Windows workflow. Descriptive sections reference its stable `evidence_id` instead of duplicating the exact workflow tuple. It does not validate later layout changes.
 
 ### Current three-section layout branch — live exact-Head authority
 
