@@ -19,5 +19,11 @@ STATUS_COLORS = {
 def apply(root):
     style = ttk.Style(root)
     style.configure("Title.TLabel", font=("Segoe UI", 15, "bold"))
+    style.configure(
+        "Subtitle.TLabel",
+        font=("Segoe UI", 9),
+        foreground="#4B5563",
+    )
+    style.configure("SectionHeading.TLabel", font=("Segoe UI", 10, "bold"))
     style.configure("StatusTitle.TLabel", font=("Segoe UI", 10, "bold"))
     style.configure("TButton", padding=(8, 5))

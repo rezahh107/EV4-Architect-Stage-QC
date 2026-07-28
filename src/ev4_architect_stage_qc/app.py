@@ -62,9 +62,13 @@ class Application:
         self.status_details = tk.StringVar()
         self.details_visible = False
         root.title("EV4 Architect Stage QC")
-        root.minsize(760, 560)
         apply(root)
         self._build()
+        root.update_idletasks()
+        root.minsize(
+            max(760, self.main_frame.winfo_reqwidth()),
+            max(560, self.main_frame.winfo_reqheight()),
+        )
         self._bind_input_invalidation()
         self._set_status(
             "not_run",
@@ -76,41 +80,127 @@ class Application:
         self._restore()
 
     def _build(self):
-        frame = ttk.Frame(self.root, padding=16)
-        frame.grid(sticky="nsew")
+        self.main_frame = ttk.Frame(self.root, padding=16)
+        self.main_frame.grid(column=0, row=0, sticky="nsew")
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
-        frame.columnconfigure(1, weight=1)
+        self.main_frame.columnconfigure(0, weight=1)
+        self.main_frame.rowconfigure(3, weight=1)
+
+        header_frame = ttk.Frame(self.main_frame)
+        header_frame.grid(column=0, row=0, sticky="ew", pady=(0, 12))
+        header_frame.columnconfigure(0, weight=1)
         ttk.Label(
-            frame,
+            header_frame,
             text="EV4 Architect Stage QC",
             style="Title.TLabel",
-        ).grid(column=0, row=0, columnspan=3, sticky="w", pady=(0, 14))
+        ).grid(column=0, row=0, sticky="w")
+        ttk.Label(
+            header_frame,
+            text="Local validation against the locked Architect Runtime",
+            style="Subtitle.TLabel",
+        ).grid(column=0, row=1, sticky="w", pady=(2, 0))
+
+        self.connection_frame = ttk.LabelFrame(
+            self.main_frame,
+            text="1. Architect Connection",
+            padding=10,
+        )
+        self.connection_frame.grid(
+            column=0,
+            row=1,
+            sticky="ew",
+            pady=(0, 12),
+        )
+        self.connection_frame.columnconfigure(0, weight=1)
         self._row(
-            frame,
-            1,
+            self.connection_frame,
+            0,
             "Architect Repository",
             self.architect,
             self.select_arch,
             "Select Architect Repository",
         )
         self.verify_button = ttk.Button(
-            frame,
+            self.connection_frame,
             text="Verify Architect Connection",
             command=self.connection,
         )
-        self.verify_button.grid(column=2, row=2, sticky="e", pady=(0, 10))
+        self.verify_button.grid(column=0, row=2, sticky="w", pady=(8, 0))
+
+        self.validation_frame = ttk.LabelFrame(
+            self.main_frame,
+            text="2. Validation",
+            padding=10,
+        )
+        self.validation_frame.grid(
+            column=0,
+            row=2,
+            sticky="ew",
+            pady=(0, 12),
+        )
+        self.validation_frame.columnconfigure(0, weight=1)
+        ttk.Label(
+            self.validation_frame,
+            text="Pipeline Validation",
+            style="SectionHeading.TLabel",
+        ).grid(column=0, row=0, columnspan=2, sticky="w", pady=(0, 8))
         self._row(
-            frame,
-            3,
+            self.validation_frame,
+            1,
             "Stage Output Folder",
             self.folder,
             self.select_folder,
             "Select Stage Folder",
         )
+        self.prefix = ttk.Button(
+            self.validation_frame,
+            text="Validate Current Pipeline Prefix",
+            command=self.prefix_validation,
+        )
+        self.prefix.grid(column=0, row=3, sticky="w", pady=(8, 0))
+        self.pref = ttk.Button(
+            self.validation_frame,
+            text="Run Prefinal Validation",
+            command=self.prefinal,
+        )
+        self.pref.grid(column=0, row=4, sticky="w", pady=(8, 0))
 
-        status_frame = ttk.Frame(frame)
-        status_frame.grid(column=0, row=5, columnspan=3, sticky="ew", pady=(4, 0))
+        ttk.Separator(
+            self.validation_frame,
+            orient="horizontal",
+        ).grid(column=0, row=5, columnspan=2, sticky="ew", pady=(14, 10))
+        ttk.Label(
+            self.validation_frame,
+            text="Final Validation",
+            style="SectionHeading.TLabel",
+        ).grid(column=0, row=6, columnspan=2, sticky="w", pady=(0, 8))
+        self._row(
+            self.validation_frame,
+            7,
+            "Project Gate Export Request JSON",
+            self.terminal,
+            self.select_terminal,
+            "Select Export Request JSON",
+        )
+        self.final = ttk.Button(
+            self.validation_frame,
+            text="Run Final Validation",
+            command=self.final_validation,
+        )
+        self.final.grid(column=0, row=9, sticky="w", pady=(8, 0))
+
+        self.result_frame = ttk.LabelFrame(
+            self.main_frame,
+            text="3. Latest Result",
+            padding=10,
+        )
+        self.result_frame.grid(column=0, row=3, sticky="nsew")
+        self.result_frame.columnconfigure(0, weight=1)
+        self.result_frame.rowconfigure(4, weight=1)
+
+        status_frame = ttk.Frame(self.result_frame)
+        status_frame.grid(column=0, row=0, sticky="ew")
         status_frame.columnconfigure(1, weight=1)
         self.status_light = tk.Canvas(
             status_frame,
@@ -130,29 +220,40 @@ class Application:
         ).grid(column=1, row=0, sticky="w")
 
         self.status_message_label = ttk.Label(
-            frame,
+            self.result_frame,
             textvariable=self.status_message,
             justify="left",
             wraplength=700,
         )
         self.status_message_label.grid(
             column=0,
-            row=6,
-            columnspan=3,
+            row=1,
             sticky="ew",
-            pady=(4, 2),
+            pady=(6, 8),
         )
+
+        result_actions = ttk.Frame(self.result_frame)
+        result_actions.grid(column=0, row=2, sticky="w")
+        self.open_button = ttk.Button(
+            result_actions,
+            text="Open Result Folder",
+            command=self.open_result,
+            state="disabled",
+        )
+        self.open_button.grid(column=0, row=0, sticky="w")
+
         self.details_button = ttk.Button(
-            frame,
+            self.result_frame,
             text="Show details",
             command=self._toggle_details,
         )
-        self.details_button.grid(column=0, row=7, sticky="w", pady=(2, 6))
+        self.details_button.grid(column=0, row=3, sticky="w", pady=(8, 6))
         self.details_button.grid_remove()
 
-        self.details_frame = ttk.Frame(frame)
-        self.details_frame.grid(column=0, row=8, columnspan=3, sticky="ew", pady=(0, 10))
+        self.details_frame = ttk.Frame(self.result_frame)
+        self.details_frame.grid(column=0, row=4, sticky="nsew")
         self.details_frame.columnconfigure(0, weight=1)
+        self.details_frame.rowconfigure(0, weight=1)
         self.details_text = tk.Text(
             self.details_frame,
             height=6,
@@ -164,7 +265,7 @@ class Application:
             pady=6,
             takefocus=1,
         )
-        self.details_text.grid(column=0, row=0, sticky="ew")
+        self.details_text.grid(column=0, row=0, sticky="nsew")
         details_scroll = ttk.Scrollbar(
             self.details_frame,
             orient="vertical",
@@ -174,49 +275,20 @@ class Application:
         self.details_text.configure(yscrollcommand=details_scroll.set, state="disabled")
         self.details_frame.grid_remove()
 
-        self.pref = ttk.Button(
-            frame,
-            text="Run Prefinal Validation",
-            command=self.prefinal,
-        )
-        self.pref.grid(column=0, row=9, sticky="w")
-        self.prefix = ttk.Button(
-            frame,
-            text="Validate Current Pipeline Prefix",
-            command=self.prefix_validation,
-        )
-        self.prefix.grid(column=0, row=10, sticky="w", pady=(10, 0))
-        self.open_button = ttk.Button(
-            frame,
-            text="Open Result Folder",
-            command=self.open_result,
-            state="disabled",
-        )
-        self.open_button.grid(column=1, row=9, sticky="w")
-        self._row(
-            frame,
-            11,
-            "Project Gate Export Request JSON",
-            self.terminal,
-            self.select_terminal,
-            "Select Export Request JSON",
-        )
-        self.final = ttk.Button(
-            frame,
-            text="Run Final Validation",
-            command=self.final_validation,
-        )
-        self.final.grid(column=0, row=13, sticky="w")
-        for child in frame.winfo_children():
-            child.grid_configure(padx=4)
-        self.root.bind("<Configure>", self._resize_status_wrap, add="+")
+        self.result_frame.bind("<Configure>", self._resize_status_wrap, add="+")
 
     def _row(self, frame, row, label, variable, command, text):
-        ttk.Label(frame, text=label).grid(column=0, row=row, sticky="w")
+        ttk.Label(frame, text=label).grid(
+            column=0,
+            row=row,
+            columnspan=2,
+            sticky="w",
+            pady=(0, 4),
+        )
         entry = ttk.Entry(frame, textvariable=variable)
-        entry.grid(column=1, row=row, sticky="ew")
+        entry.grid(column=0, row=row + 1, sticky="ew")
         button = ttk.Button(frame, text=text, command=command)
-        button.grid(column=2, row=row, sticky="e", pady=(0, 10))
+        button.grid(column=1, row=row + 1, sticky="e", padx=(8, 0))
         self._input_widgets.extend((entry, button))
 
     def _bind_input_invalidation(self):
@@ -240,8 +312,8 @@ class Application:
         )
 
     def _resize_status_wrap(self, event):
-        if event.widget is self.root:
-            self.status_message_label.configure(wraplength=max(420, event.width - 48))
+        if event.widget is self.result_frame:
+            self.status_message_label.configure(wraplength=max(320, event.width - 24))
 
     def _restore(self):
         saved = load_settings().get("architect_repository_path")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+import re
 
 import pytest
 
@@ -439,11 +440,113 @@ def test_internal_error_uses_danger_state_without_traceback_as_primary_message()
     assert "RuntimeError" in application.status_details.get()
 
 
-def test_gui_declares_exact_prefix_label_and_imports_no_governed_runtime():
-    source = (
+def _app_source() -> str:
+    return (
         Path(__file__).resolve().parents[1]
         / "src/ev4_architect_stage_qc/app.py"
     ).read_text(encoding="utf-8")
+
+
+def _section_grid_row(source: str, name: str) -> int:
+    match = re.search(
+        rf"self\.{name}\.grid\(\s*column=0,\s*row=(\d+),",
+        source,
+    )
+    assert match is not None
+    return int(match.group(1))
+
+
+def test_three_main_sections_exist_in_required_vertical_order():
+    source = _app_source()
+
+    assert 'text="1. Architect Connection"' in source
+    assert 'text="2. Validation"' in source
+    assert 'text="3. Latest Result"' in source
+    assert (
+        _section_grid_row(source, "connection_frame")
+        < _section_grid_row(source, "validation_frame")
+        < _section_grid_row(source, "result_frame")
+    )
+    assert "self.main_frame.columnconfigure(0, weight=1)" in source
+    assert "self.connection_frame.columnconfigure(0, weight=1)" in source
+    assert "self.validation_frame.columnconfigure(0, weight=1)" in source
+    assert "self.result_frame.columnconfigure(0, weight=1)" in source
+
+
+def test_validation_controls_are_grouped_before_latest_result():
+    source = _app_source()
+
+    validation_start = source.index("self.validation_frame = ttk.LabelFrame")
+    result_start = source.index("self.result_frame = ttk.LabelFrame")
+    final_input = source.index('"Project Gate Export Request JSON"', validation_start)
+    final_button = source.index("self.final = ttk.Button", validation_start)
+
+    assert validation_start < final_input < final_button < result_start
+    assert re.search(
+        r"self\.prefix = ttk\.Button\(\s*self\.validation_frame,",
+        source,
+    )
+    assert re.search(
+        r"self\.pref = ttk\.Button\(\s*self\.validation_frame,",
+        source,
+    )
+    assert re.search(
+        r"self\.final = ttk\.Button\(\s*self\.validation_frame,",
+        source,
+    )
+
+
+def test_result_actions_and_details_belong_to_latest_result():
+    source = _app_source()
+
+    assert "result_actions = ttk.Frame(self.result_frame)" in source
+    assert re.search(
+        r"self\.open_button = ttk\.Button\(\s*result_actions,",
+        source,
+    )
+    assert re.search(
+        r"self\.details_button = ttk\.Button\(\s*self\.result_frame,",
+        source,
+    )
+    assert "self.details_frame = ttk.Frame(self.result_frame)" in source
+    assert "self.details_frame.grid(column=0, row=4, sticky=\"nsew\")" in source
+    assert "self.details_frame.grid_remove()" in source
+
+
+def test_result_wrapping_is_bound_to_result_section_width():
+    source = _app_source()
+
+    assert (
+        'self.result_frame.bind("<Configure>", self._resize_status_wrap, add="+")'
+        in source
+    )
+    assert "if event.widget is self.result_frame:" in source
+    assert "wraplength=max(320, event.width - 24)" in source
+
+
+def test_conceptual_focus_order_follows_workflow_order():
+    source = _app_source()
+    labels = [
+        '"Architect Repository"',
+        '"Select Architect Repository"',
+        '"Verify Architect Connection"',
+        '"Stage Output Folder"',
+        '"Select Stage Folder"',
+        '"Validate Current Pipeline Prefix"',
+        '"Run Prefinal Validation"',
+        '"Project Gate Export Request JSON"',
+        '"Select Export Request JSON"',
+        '"Run Final Validation"',
+        '"Open Result Folder"',
+        '"Show details"',
+    ]
+    positions = [source.index(label) for label in labels]
+
+    assert positions == sorted(positions)
+
+
+def test_gui_declares_exact_prefix_label_and_imports_no_governed_runtime():
+    source = _app_source()
     tree = ast.parse(source)
     imported = {
         alias.name
