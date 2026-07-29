@@ -1,7 +1,7 @@
 # STATUS — EV4 Architect Stage QC
 
-Version: 1.3.2
-Status: pr45_authority_reconciliation_implemented_pending_exact_head_ci_and_fresh_review
+Version: 1.3.3
+Status: pr45_authority_reconciliation_implemented_external_exact_head_evidence_required
 Last update: 2026-07-29
 
 ## Current Authority
@@ -19,12 +19,12 @@ locked_architect_reference_commit: bd7cb512f9b61222cee2512fbfc53a2bb01a1175
 merged_baseline_status: merged
 current_feature: Architect PR #45 post-merge authority Lock reconciliation
 current_feature_branch: fix/reconcile-architect-pr45-authority
-current_feature_status: implemented_pending_canonical_exact_head_validation
-current_feature_exact_head_ci: pending_live_github_actions_current_pr_head
-exact_head_windows_workflow: pending_live_github_actions_current_pr_head
+current_feature_status: implemented
+canonical_lock_validation_model: live_external_exact_head_evidence
+exact_head_ci_result_storage: not_embedded_in_repository_status
+current_head_requires_fresh_external_ci: true
+fresh_independent_review_required_after_final_commit: true
 exact_head_ci_authority: live_github_actions_current_pr_head
-committed_current_head_ci_result: not_embedded
-fresh_exact_head_run_required_after_each_commit: true
 application_mode: local_windows_first_tkinter_gui
 production_deployment: not_applicable_local_tool
 release_performed: false
@@ -36,7 +36,8 @@ release_performed: false
 
 ```yaml
 work_unit_id: WU-STAGEQC-PR45-AUTHORITY-RECONCILE-001
-implementation_state: implemented_pending_validation
+evidence_closure_work_unit_id: WU-STAGEQC-PR13-EVIDENCE-CLOSURE-001
+implementation_state: implemented
 stage_qc_base_sha: 1682cbb2f7559eee2bd356e9051d4dfc6f830cb9
 architect_pull_request: 45
 architect_merge_commit: bd7cb512f9b61222cee2512fbfc53a2bb01a1175
@@ -47,12 +48,12 @@ compatibility_mode: authority_file_identity
 runtime_authority_manifest_blob_oid: 9ec80df51938a245f9f6af49409aa79cd664488b
 authority_file_count: 41
 canonical_generator_required: true
-local_canonical_generator_execution: not_run_environment_cannot_materialize_remote_git_checkout
+local_canonical_generator_execution: required_external_to_repository_status
 candidate_lock_inventory_source: exact_manifest_closure_and_exact_committed_blob_oids_via_github_connector
-canonical_lock_check: pending_exact_head_windows_ci
-focused_tests: pending_exact_head_windows_ci
-full_suite: pending_exact_head_windows_ci
-exact_head_windows_ci: pending_live_workflow
+canonical_lock_validation_model: live_external_exact_head_evidence
+exact_head_ci_result_storage: not_embedded_in_repository_status
+current_head_requires_fresh_external_ci: true
+fresh_independent_review_required_after_final_commit: true
 fresh_independent_review: pending
 merge_performed: false
 architect_repository_mutated: false
@@ -61,7 +62,7 @@ verifier_semantics_changed: false
 workflow_changed: false
 ```
 
-The prior Lock is preserved in Git history as stale-defect evidence. The current branch updates the Lock to the exact Architect PR #45 merge authority closure without weakening `authority_file_identity`. Because this execution environment could not materialize a real remote Git checkout, it did not execute the canonical generator locally; the committed candidate Lock therefore remains unvalidated until the repository workflow checks it byte-for-byte with the canonical generator against exact Architect commit `bd7cb512f9b61222cee2512fbfc53a2bb01a1175`. No merge-readiness claim is made before that exact-head evidence and fresh independent review exist.
+The prior Lock is preserved in Git history as stale-defect evidence. The current branch updates the Lock to the exact Architect PR #45 merge authority closure without weakening `authority_file_identity`. Current-Head canonical Lock, integration, and full-suite results are external evidence: they are valid only when a successful live GitHub Actions `validate` run is bound to the current PR Head and the exact Architect reference `bd7cb512f9b61222cee2512fbfc53a2bb01a1175`. Repository status does not embed mutable current-Head CI truth, and no merge-readiness claim is made before fresh external CI and a fresh independent review exist on the same final Head.
 
 ## Three-Section Vertical UI Layout
 
@@ -355,15 +356,16 @@ Stage-QC is a consumer and local validator. It must not copy the Runtime, create
 ```yaml
 branch: fix/reconcile-architect-pr45-authority
 architect_reference_head: bd7cb512f9b61222cee2512fbfc53a2bb01a1175
-current_feature_exact_head_ci: pending_live_github_actions_current_pr_head
-exact_head_windows_workflow: pending_live_github_actions_current_pr_head
-exact_head_ci_authority: live_github_actions_current_pr_head
-committed_current_head_ci_result: not_embedded
-fresh_exact_head_run_required_after_each_commit: true
+implementation_state: implemented
+canonical_lock_validation_model: live_external_exact_head_evidence
+exact_head_ci_result_storage: not_embedded_in_repository_status
+current_head_requires_fresh_external_ci: true
+fresh_independent_review_required_after_final_commit: true
 fresh_independent_review: pending
+merge_performed: false
 ```
 
-The branch Head is mutable. Current evidence must come from a successful live GitHub Actions `validate` run whose commit identity exactly equals the current PR Head and whose Lock-selected Architect checkout is `bd7cb512f9b61222cee2512fbfc53a2bb01a1175`. Any later commit makes prior branch CI historical only.
+The branch Head is mutable. Current evidence lives outside `STATUS.md` and must come from a successful live GitHub Actions `validate` run whose commit identity exactly equals the current PR Head and whose Lock-selected Architect checkout is `bd7cb512f9b61222cee2512fbfc53a2bb01a1175`. Every later commit requires fresh CI and a fresh independent review; prior branch evidence becomes historical only.
 
 ### Merged Prefix PR #8 — immutable evidence
 
@@ -548,4 +550,4 @@ Prefix validation additionally proves only that a compatible selected checkout e
 
 ## Next Step
 
-Require the live Windows GitHub Actions `validate` workflow to complete successfully on the exact `fix/reconcile-architect-pr45-authority` PR Head and exact Architect Lock reference `bd7cb512f9b61222cee2512fbfc53a2bb01a1175`. Then require a fresh independent review on that same Head. If both are clean, the owner may merge this Stage-QC PR administratively before executing `WU-ARCH-POST45-CURRENT-STATE-001`. Keep Merge, approval, auto-merge, deployment, and release unperformed in this work unit.
+Obtain a successful live Windows GitHub Actions `validate` run on the current exact `fix/reconcile-architect-pr45-authority` PR Head with Architect Lock reference `bd7cb512f9b61222cee2512fbfc53a2bb01a1175`, then obtain a fresh independent review on that same unchanged Head. Only after both external gates are clean may the owner make a separate merge decision before executing `WU-ARCH-POST45-CURRENT-STATE-001`. Keep Merge, approval, auto-merge, deployment, and release unperformed in this work unit.
